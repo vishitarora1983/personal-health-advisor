@@ -1,0 +1,14 @@
+# OS
+.DS_Store
+
+# Screenshots & images (local dev artifacts)
+screenshots/
+*.png
+
+# IDE / editors
+.vscode/
+.idea/
+
+# Claude / Playwright local config
+.claude/
+.playwright-mcp/

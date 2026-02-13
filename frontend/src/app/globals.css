@@ -1,0 +1,345 @@
+@import "tailwindcss";
+
+/* ──────────────────────────────────────────────────────
+   BOTANICAL LUXE DESIGN SYSTEM
+   A premium wellness aesthetic: deep emerald & sage greens,
+   warm amber accents, soft cream canvas, glassmorphic surfaces.
+   ────────────────────────────────────────────────────── */
+
+@layer base {
+  :root {
+    /* ── Core palette ── */
+    --color-emerald-deep: #1a3a2a;
+    --color-emerald: #2d5a3f;
+    --color-emerald-light: #3d7a56;
+    --color-sage: #7fa88a;
+    --color-sage-light: #a8c5b0;
+    --color-sage-mist: #d4e4d8;
+
+    --color-amber: #d4940a;
+    --color-amber-warm: #e6a817;
+    --color-amber-glow: #f0c14b;
+    --color-amber-light: #fef3d0;
+
+    --color-cream: #faf8f4;
+    --color-cream-warm: #f5f0e8;
+    --color-ivory: #fdfcf9;
+
+    --color-clay: #4a3f35;
+    --color-clay-light: #6b5d50;
+    --color-clay-muted: #8a7d72;
+    --color-clay-subtle: #c4bbb2;
+
+    --color-coral: #d45a3a;
+    --color-coral-light: #e87960;
+    --color-coral-bg: #fef0ec;
+
+    --color-teal-soft: #2a8a7a;
+
+    /* ── Surface & glass tokens ── */
+    --surface-primary: rgba(255, 255, 253, 0.72);
+    --surface-primary-solid: #fffffb;
+    --surface-elevated: rgba(255, 255, 253, 0.85);
+    --surface-glass: rgba(255, 255, 253, 0.55);
+    --surface-glass-border: rgba(45, 90, 63, 0.10);
+    --glass-blur: 20px;
+    --glass-saturate: 1.6;
+
+    /* ── Shadows ── */
+    --shadow-sm: 0 1px 3px rgba(26, 58, 42, 0.06), 0 1px 2px rgba(26, 58, 42, 0.04);
+    --shadow-md: 0 4px 12px rgba(26, 58, 42, 0.08), 0 2px 4px rgba(26, 58, 42, 0.04);
+    --shadow-lg: 0 12px 32px rgba(26, 58, 42, 0.10), 0 4px 8px rgba(26, 58, 42, 0.05);
+    --shadow-xl: 0 20px 48px rgba(26, 58, 42, 0.12), 0 8px 16px rgba(26, 58, 42, 0.06);
+    --shadow-glow-amber: 0 0 20px rgba(212, 148, 10, 0.25), 0 0 40px rgba(212, 148, 10, 0.10);
+    --shadow-glow-emerald: 0 0 20px rgba(45, 90, 63, 0.20), 0 0 40px rgba(45, 90, 63, 0.08);
+
+    /* ── Radii ── */
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 20px;
+    --radius-2xl: 24px;
+    --radius-full: 9999px;
+
+    /* ── Transitions ── */
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --duration-fast: 150ms;
+    --duration-normal: 250ms;
+    --duration-slow: 400ms;
+    --duration-glacial: 600ms;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    color: var(--color-clay);
+    background-color: var(--color-cream);
+    background-image:
+      radial-gradient(ellipse 80% 50% at 20% 0%, rgba(45, 90, 63, 0.04), transparent),
+      radial-gradient(ellipse 60% 40% at 80% 100%, rgba(212, 148, 10, 0.03), transparent),
+      radial-gradient(ellipse 50% 60% at 50% 50%, rgba(127, 168, 138, 0.02), transparent);
+    background-attachment: fixed;
+  }
+
+  /* ── Selection ── */
+  ::selection {
+    background-color: rgba(45, 90, 63, 0.15);
+    color: var(--color-emerald-deep);
+  }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-sage-light);
+    border-radius: var(--radius-full);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-sage);
+  }
+
+  /* ── Focus ── */
+  :focus-visible {
+    outline: 2px solid var(--color-emerald);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* ── Headings ── */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display), serif;
+    color: var(--color-emerald-deep);
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer components {
+  /* ── Animations ── */
+  .animate-slide-down {
+    animation: slideDown 0.35s var(--ease-out-expo);
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.4s var(--ease-out-expo);
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.5s var(--ease-out-expo);
+  }
+
+  .animate-scale-in {
+    animation: scaleIn 0.35s var(--ease-out-back);
+  }
+
+  .animate-shimmer {
+    animation: shimmer 2s ease-in-out infinite;
+    background-size: 200% 100%;
+  }
+
+  .animate-glow-pulse {
+    animation: glowPulse 2.5s ease-in-out infinite;
+  }
+
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+
+  /* ── Stagger delays for orchestrated reveals ── */
+  .stagger-1 { animation-delay: 0.05s; animation-fill-mode: backwards; }
+  .stagger-2 { animation-delay: 0.10s; animation-fill-mode: backwards; }
+  .stagger-3 { animation-delay: 0.15s; animation-fill-mode: backwards; }
+  .stagger-4 { animation-delay: 0.20s; animation-fill-mode: backwards; }
+  .stagger-5 { animation-delay: 0.25s; animation-fill-mode: backwards; }
+  .stagger-6 { animation-delay: 0.30s; animation-fill-mode: backwards; }
+
+  /* ── Glass surface ── */
+  .glass-surface {
+    background: var(--surface-primary);
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    border: 1px solid var(--surface-glass-border);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .glass-surface-elevated {
+    background: var(--surface-elevated);
+    backdrop-filter: blur(24px) saturate(1.8);
+    -webkit-backdrop-filter: blur(24px) saturate(1.8);
+    border: 1px solid rgba(45, 90, 63, 0.08);
+    box-shadow: var(--shadow-md);
+  }
+
+  /* ── Gradient accents ── */
+  .gradient-emerald {
+    background: linear-gradient(135deg, var(--color-emerald-deep) 0%, var(--color-emerald) 50%, var(--color-emerald-light) 100%);
+  }
+
+  .gradient-amber {
+    background: linear-gradient(135deg, var(--color-amber) 0%, var(--color-amber-warm) 50%, var(--color-amber-glow) 100%);
+  }
+
+  .gradient-botanical {
+    background: linear-gradient(145deg, var(--color-emerald-deep) 0%, var(--color-emerald) 40%, var(--color-teal-soft) 100%);
+  }
+
+  .gradient-warm {
+    background: linear-gradient(135deg, var(--color-amber) 0%, var(--color-coral) 100%);
+  }
+
+  /* ── Text gradients ── */
+  .text-gradient-emerald {
+    background: linear-gradient(135deg, var(--color-emerald-deep), var(--color-emerald-light));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .text-gradient-amber {
+    background: linear-gradient(135deg, var(--color-amber), var(--color-amber-warm));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* ── Decorative line ── */
+  .accent-line {
+    height: 3px;
+    background: linear-gradient(90deg, var(--color-amber), var(--color-amber-warm), transparent);
+    border-radius: var(--radius-full);
+  }
+
+  /* ── Custom checkbox styling ── */
+  .checkbox-botanical {
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--color-sage-light);
+    border-radius: 5px;
+    background: white;
+    cursor: pointer;
+    position: relative;
+    transition: all var(--duration-fast) var(--ease-out-expo);
+    flex-shrink: 0;
+  }
+
+  .checkbox-botanical:checked {
+    background: linear-gradient(135deg, var(--color-emerald), var(--color-emerald-light));
+    border-color: var(--color-emerald);
+  }
+
+  .checkbox-botanical:checked::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 5px;
+    width: 5px;
+    height: 9px;
+    border: 2px solid white;
+    border-top: none;
+    border-left: none;
+    transform: rotate(45deg);
+  }
+
+  .checkbox-botanical:hover {
+    border-color: var(--color-emerald);
+    box-shadow: 0 0 0 3px rgba(45, 90, 63, 0.08);
+  }
+
+  .checkbox-botanical:focus-visible {
+    outline: 2px solid var(--color-emerald);
+    outline-offset: 2px;
+  }
+
+  /* ── Organic noise texture overlay ── */
+  .texture-overlay::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: 0.015;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    pointer-events: none;
+    border-radius: inherit;
+  }
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes glowPulse {
+  0%, 100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
