@@ -135,6 +135,7 @@ class ProfileResponse(BaseModel):
     """
     id: int
     name: str
+    is_joint: bool = False
     age: int
     gender: str
     height_cm: float
@@ -182,6 +183,7 @@ class ProfileListItem(BaseModel):
     """Lightweight profile summary for listing all profiles."""
     id: int
     name: str
+    is_joint: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -203,3 +205,41 @@ class NutritionTargetsResponse(BaseModel):
     target_sodium: int = Field(description="Daily sodium limit in milligrams")
     target_sugar: int = Field(description="Daily sugar limit in grams")
     macro_split: dict = Field(description="Macro percentage split (protein, carbs, fats)")
+
+
+class JointProfileCreate(BaseModel):
+    """Schema for creating a joint profile from existing individual profiles."""
+    name: str = Field(min_length=1, max_length=100)
+    primary_profile_id: int
+    member_profile_ids: List[int] = Field(min_length=1)
+
+
+class JointProfileMemberResponse(BaseModel):
+    """A member within a joint profile."""
+    profile_id: int
+    profile_name: str
+    is_primary: bool
+
+
+class JointProfileResponse(BaseModel):
+    """Response for a joint profile with its members."""
+    profile: ProfileResponse
+    members: List[JointProfileMemberResponse]
+
+
+class MemberNutritionTargetsResponse(BaseModel):
+    """Per-member nutrition targets with share ratio for proportional serving breakdown."""
+    profile_id: int
+    profile_name: str
+    is_primary: bool
+    share_ratio: float
+    bmr: float
+    tdee: float
+    target_calories: int
+    target_protein: int
+    target_carbs: int
+    target_fats: int
+    target_fiber: int
+    target_sodium: int
+    target_sugar: int
+    macro_split: dict

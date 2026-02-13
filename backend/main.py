@@ -53,6 +53,13 @@ async def lifespan(app: FastAPI):
             ))
         print("✓ Migrated user_profiles: added 'name' column")
 
+    if "is_joint" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE user_profiles ADD COLUMN is_joint BOOLEAN DEFAULT 0 NOT NULL"
+            ))
+        print("✓ Migrated user_profiles: added 'is_joint' column")
+
     print("✓ Database tables created successfully")
     db_type = settings.DATABASE_URL.split("://")[0] if "://" in settings.DATABASE_URL else "sqlite"
     print(f"  Database type: {db_type}")

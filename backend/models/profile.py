@@ -6,7 +6,7 @@ including physical stats, dietary restrictions, preferences, and nutritional tar
 """
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime, Boolean
 from sqlalchemy.orm import relationship
 from database import Base
 import json
@@ -34,6 +34,9 @@ class UserProfile(Base):
 
     # Profile Name
     name = Column(String(100), nullable=False, server_default="My Profile")
+
+    # Joint Profile Flag
+    is_joint = Column(Boolean, default=False, server_default="0", nullable=False)
 
     # Physical Characteristics (for BMR/TDEE calculation)
     age = Column(Integer, nullable=False, comment="Age in years")

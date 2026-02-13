@@ -4,6 +4,9 @@ import type {
   ProfileFormData,
   ProfileListItem,
   NutritionTargets,
+  JointProfileCreate,
+  JointProfileMember,
+  MemberNutritionTargets,
   WeeklyPlan,
   DailyPlan,
   Meal,
@@ -99,6 +102,30 @@ export async function deleteProfile(profileId: number): Promise<void> {
  */
 export async function getNutritionTargets(profileId: number): Promise<NutritionTargets> {
   const response = await apiClient.get<NutritionTargets>(`/profile/${profileId}/nutrition-targets`);
+  return response.data;
+}
+
+/**
+ * Create a joint profile combining multiple individual profiles.
+ */
+export async function createJointProfile(data: JointProfileCreate): Promise<{ profile: UserProfile; members: JointProfileMember[] }> {
+  const response = await apiClient.post<{ profile: UserProfile; members: JointProfileMember[] }>('/profile/joint', data);
+  return response.data;
+}
+
+/**
+ * Get the member list for a joint profile.
+ */
+export async function getJointMembers(profileId: number): Promise<JointProfileMember[]> {
+  const response = await apiClient.get<JointProfileMember[]>(`/profile/${profileId}/joint-members`);
+  return response.data;
+}
+
+/**
+ * Get per-member nutrition targets with share ratios for a joint profile.
+ */
+export async function getMemberNutritionTargets(profileId: number): Promise<MemberNutritionTargets[]> {
+  const response = await apiClient.get<MemberNutritionTargets[]>(`/profile/${profileId}/member-nutrition-targets`);
   return response.data;
 }
 

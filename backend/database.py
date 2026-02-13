@@ -5,7 +5,7 @@ This module sets up the database engine, session factory, and base model class.
 Uses SQLAlchemy 2.0 style with declarative base.
 """
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 from typing import Generator
 
@@ -21,6 +21,14 @@ engine = create_engine(
     echo=False,  # Set to True for SQL query debugging
     pool_pre_ping=True,  # Verify connections before using them
 )
+
+# Enable SQLite foreign key enforcement so CASCADE deletes work
+if "sqlite" in settings.DATABASE_URL:
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 # Session factory for creating database sessions
 # autocommit=False: Explicit transaction control

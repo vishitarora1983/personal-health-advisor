@@ -13,18 +13,19 @@ import {
   generateMealPlan,
   generateRecipe,
   getNutritionTargets,
+  getMemberNutritionTargets,
   swapMeal,
   regenerateDay,
   regeneratePlan,
 } from '@/lib/api';
 import { useProfile } from '@/lib/ProfileContext';
 import { getErrorMessage } from '@/lib/utils';
-import type { WeeklyPlan, Meal, NutritionTargets } from '@/types';
+import type { WeeklyPlan, Meal, NutritionTargets, MemberNutritionTargets } from '@/types';
 
 export default function MealPlanPage() {
   const router = useRouter();
   const toast = useToast();
-  const { activeProfileId, loading: profileLoading } = useProfile();
+  const { activeProfileId, activeProfile, loading: profileLoading } = useProfile();
 
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -33,6 +34,7 @@ export default function MealPlanPage() {
   const [regeneratingDayIndex, setRegeneratingDayIndex] = useState<number | null>(null);
   const [regeneratingWeek, setRegeneratingWeek] = useState(false);
   const [targets, setTargets] = useState<NutritionTargets | null>(null);
+  const [memberTargets, setMemberTargets] = useState<MemberNutritionTargets[] | null>(null);
 
   useEffect(() => {
     if (profileLoading) return;
@@ -65,12 +67,24 @@ export default function MealPlanPage() {
       } catch {
         // Non-critical — page works without targets
       }
+
+      // For joint profiles, also fetch per-member nutrition targets
+      if (activeProfile?.is_joint) {
+        try {
+          const mt = await getMemberNutritionTargets(activeProfileId!);
+          setMemberTargets(mt);
+        } catch {
+          // Non-critical
+        }
+      } else {
+        setMemberTargets(null);
+      }
     }
 
     setLoading(true);
     setWeeklyPlan(null);
     initialize();
-  }, [activeProfileId, profileLoading, router, toast]);
+  }, [activeProfileId, activeProfile, profileLoading, router, toast]);
 
   const handleGeneratePlan = async () => {
     if (!activeProfileId) return;
@@ -235,6 +249,7 @@ export default function MealPlanPage() {
         <WeekView
           weeklyPlan={weeklyPlan}
           nutritionTargets={targets}
+          memberNutritionTargets={memberTargets}
           onSwapMeal={handleSwapMeal}
           onRegenerateDay={handleRegenerateDay}
           onRecipeLoad={handleRecipeLoad}

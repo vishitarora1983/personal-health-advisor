@@ -9,6 +9,7 @@
 export interface UserProfile {
   id: number;
   name: string;
+  is_joint: boolean;
 
   // Basic demographic information
   age: number;
@@ -105,7 +106,36 @@ export interface NutritionTargets {
 export interface ProfileListItem {
   id: number;
   name: string;
+  is_joint: boolean;
   created_at: string;
+}
+
+/**
+ * Request data for creating a joint profile.
+ */
+export interface JointProfileCreate {
+  name: string;
+  primary_profile_id: number;
+  member_profile_ids: number[];
+}
+
+/**
+ * A member within a joint profile.
+ */
+export interface JointProfileMember {
+  profile_id: number;
+  profile_name: string;
+  is_primary: boolean;
+}
+
+/**
+ * Per-member nutrition targets with share ratio for proportional serving breakdown.
+ */
+export interface MemberNutritionTargets extends NutritionTargets {
+  profile_id: number;
+  profile_name: string;
+  is_primary: boolean;
+  share_ratio: number;
 }
 
 // ============================================================================

@@ -18,6 +18,7 @@ import {
   Leaf,
   ChefHat,
   Sparkles,
+  Info,
 } from 'lucide-react';
 
 export default function ProfilePage() {
@@ -36,7 +37,7 @@ function ProfilePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const toast = useToast();
-  const { activeProfileId, switchProfile, refreshProfiles } = useProfile();
+  const { activeProfileId, activeProfile, switchProfile, refreshProfiles } = useProfile();
 
   const isNewMode = searchParams.get('new') === 'true';
 
@@ -345,6 +346,27 @@ function ProfilePageContent() {
         <div className="accent-line w-24 mt-5" />
       </div>
 
+      {/* Joint profile guard banner */}
+      {isEditing && activeProfile?.is_joint && (
+        <div
+          className="flex items-start gap-3 p-4 rounded-xl mb-7 animate-fade-in"
+          style={{
+            background: 'rgba(212, 148, 10, 0.06)',
+            border: '1px solid rgba(212, 148, 10, 0.15)',
+          }}
+        >
+          <Info className="h-5 w-5 shrink-0 mt-0.5" style={{ color: 'var(--color-amber)' }} />
+          <div>
+            <p className="text-sm font-semibold" style={{ color: 'var(--color-amber-warm)' }}>
+              Joint Profile
+            </p>
+            <p className="text-sm mt-0.5" style={{ color: 'var(--color-clay-muted)' }}>
+              This is a joint profile. Settings are inherited from the primary member. Household size is auto-managed based on the number of members.
+            </p>
+          </div>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-7">
         {/* Profile Name */}
         <Card className="animate-slide-up">
@@ -418,16 +440,18 @@ function ProfilePageContent() {
                 required
                 fullWidth
               />
-              <Input
-                label="Household Size"
-                type="number"
-                value={formData.household_size}
-                onChange={(e) => setFormData({ ...formData, household_size: Number(e.target.value) })}
-                min={1}
-                max={10}
-                helperText="Number of people you cook for"
-                fullWidth
-              />
+              {!(isEditing && activeProfile?.is_joint) && (
+                <Input
+                  label="Household Size"
+                  type="number"
+                  value={formData.household_size}
+                  onChange={(e) => setFormData({ ...formData, household_size: Number(e.target.value) })}
+                  min={1}
+                  max={10}
+                  helperText="Number of people you cook for"
+                  fullWidth
+                />
+              )}
             </div>
           </Card.Body>
         </Card>

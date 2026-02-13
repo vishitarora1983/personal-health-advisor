@@ -12,6 +12,7 @@ from .profile import UserProfile
 from .meal_plan import WeeklyPlan, DailyPlan, Meal
 from .tracking import MealTracking
 from .grocery import GroceryItem
+from .joint_profile import JointProfileMember
 
 # Expose models for easy importing
 __all__ = [
@@ -21,5 +22,6 @@ __all__ = [
     "DailyPlan",
     "Meal",
     "MealTracking",
-    "GroceryItem"
+    "GroceryItem",
+    "JointProfileMember",
 ]

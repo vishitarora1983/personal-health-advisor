@@ -53,7 +53,10 @@ SYSTEM_PROMPT = """You are an expert nutritionist and meal planner with deep kno
   - Can exceed max_cook_time slightly if justified
 
 ### Recipe Quality Standards
-- Portion sizes must be exact (e.g., "1 cup cooked rice (200g)", "6 oz grilled chicken (170g)")
+- **CRITICAL: Portion sizes MUST be exact with weight in grams**. Every portion_size MUST include total grams in parentheses.
+  - GOOD: "2 rotis (120g) + 1 cup dal (250g)" or "1 bowl oatmeal (350g)" or "2 eggs (100g) + 2 toast slices (60g)"
+  - BAD: "1 serving", "1 plate", "1 portion", "a bowl of..." — these are NEVER acceptable
+- For households with multiple people, portion_size is the TOTAL for the entire household. Always state the total weight.
 - Ingredients must include specific quantities and units
 - Recipe brief must be 2-4 sentences with clear, actionable steps
 - Prep time must not exceed user's max_cook_time (unless advanced skill)
@@ -164,7 +167,7 @@ MEAL_PLAN_JSON_SCHEMA = {
                                 },
                                 "portion_size": {
                                     "type": "string",
-                                    "description": "Exact quantities using cups/bowls/grams/pieces/count (e.g., '1 bowl (300g)', '2 rotis + 1 cup dal', '4 pieces (200g)'). NEVER use vague '1 serving'."
+                                    "description": "TOTAL quantity for the full household with exact weight in grams. Examples: '1 bowl oatmeal (350g)', '2 rotis (120g) + 1 cup dal (250g)', '6 oz chicken breast (170g) + 1 cup rice (200g)'. MUST always include grams in parentheses. NEVER '1 serving' or '1 plate'."
                                 },
                                 "calories": {
                                     "type": "number",
@@ -287,8 +290,9 @@ def build_user_prompt(profile, nutrition_targets: Dict[str, Any]) -> str:
 2. Daily totals MUST be within ±50 calories and ±5g macros of the targets above
 3. NEVER include allergens: {', '.join(allergies) if allergies else 'none listed'}
 4. All meals must be unique across the 7 days
-5. Portion sizes should account for household size of {profile.household_size}
-6. Do NOT include "ingredients" or "recipe_brief" — recipes are generated separately
+5. **ALL nutritional values (calories, protein, carbs, fats, fiber) are the TOTAL for {profile.household_size} {'person' if profile.household_size == 1 else 'people combined'}**
+6. **Portion sizes MUST be the TOTAL quantity for {profile.household_size} {'person' if profile.household_size == 1 else 'people'}, always including weight in grams** (e.g., "2 bowls oatmeal (700g total)" for 2 people, or "1 bowl oatmeal (350g)" for 1 person). NEVER use vague terms like "1 serving".
+7. Do NOT include "ingredients" or "recipe_brief" — recipes are generated separately
 
 Please generate the complete 7-day meal plan now as a JSON object with this exact structure:
 {{

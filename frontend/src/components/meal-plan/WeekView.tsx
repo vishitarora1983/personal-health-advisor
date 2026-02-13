@@ -5,11 +5,12 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { DayColumn } from './DayColumn';
 import { getDayName, formatDate, isToday, parseLocalDate } from '@/lib/utils';
 import { cn } from '@/lib/utils';
-import type { WeeklyPlan, Meal, NutritionTargets } from '@/types';
+import type { WeeklyPlan, Meal, NutritionTargets, MemberNutritionTargets } from '@/types';
 
 interface WeekViewProps {
   weeklyPlan: WeeklyPlan;
   nutritionTargets?: NutritionTargets | null;
+  memberNutritionTargets?: MemberNutritionTargets[] | null;
   onSwapMeal: (mealId: number) => void;
   onRegenerateDay: (dayIndex: number) => void;
   onRecipeLoad?: (mealId: number) => Promise<Meal>;
@@ -24,6 +25,7 @@ interface WeekViewProps {
 export function WeekView({
   weeklyPlan,
   nutritionTargets,
+  memberNutritionTargets,
   onSwapMeal,
   onRegenerateDay,
   onRecipeLoad,
@@ -153,6 +155,7 @@ export function WeekView({
         dailyPlan={currentDay}
         dayIndex={selectedDay}
         nutritionTargets={nutritionTargets}
+        memberNutritionTargets={memberNutritionTargets}
         onSwapMeal={onSwapMeal}
         onRegenerateDay={onRegenerateDay}
         onRecipeLoad={onRecipeLoad}

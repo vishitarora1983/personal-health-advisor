@@ -6,13 +6,14 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { formatMacros, capitalize } from '@/lib/utils';
-import type { Meal } from '@/types';
+import type { Meal, MemberNutritionTargets } from '@/types';
 
 interface MealCardProps {
   meal: Meal;
   onSwap: (mealId: number) => void;
   onRecipeLoad?: (mealId: number) => Promise<Meal>;
   swapping?: boolean;
+  memberNutritionTargets?: MemberNutritionTargets[] | null;
 }
 
 /**
@@ -20,7 +21,32 @@ interface MealCardProps {
  * Shows nutrition info, cooking time, and swap functionality.
  * Loads recipe on demand when user clicks "Recipe".
  */
-export function MealCard({ meal, onSwap, onRecipeLoad, swapping = false }: MealCardProps) {
+/**
+ * Scale a portion_size string by a ratio, adjusting all numeric quantities and gram weights.
+ * e.g. "2 cups chickpeas (500g) + 4 bhature (400g total)" with ratio 0.56
+ *    → "~1 cups chickpeas (~280g) + ~2 bhature (~224g total)"
+ */
+function scalePortionString(portionSize: string, ratio: number): string {
+  const parts = portionSize.split(/\s*\+\s*/);
+
+  return parts.map((part) => {
+    // Scale the leading quantity number (e.g., "2 cups" → "~1 cups")
+    let scaled = part.replace(/^(\d+\.?\d*)/, (_, num) => {
+      const val = parseFloat(num) * ratio;
+      return '~' + (val < 1 ? val.toFixed(1) : String(Math.round(val * 10) / 10).replace(/\.0$/, ''));
+    });
+
+    // Scale gram values in parentheses (e.g., "(500g)" → "(~280g)")
+    scaled = scaled.replace(/\((\d+\.?\d*)\s*g([^)]*)\)/, (_, num, rest) => {
+      const val = Math.round(parseFloat(num) * ratio);
+      return `(~${val}g${rest})`;
+    });
+
+    return scaled;
+  }).join(' + ');
+}
+
+export function MealCard({ meal, onSwap, onRecipeLoad, swapping = false, memberNutritionTargets }: MealCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [loadingRecipe, setLoadingRecipe] = useState(false);
 
@@ -89,8 +115,14 @@ export function MealCard({ meal, onSwap, onRecipeLoad, swapping = false }: MealC
             border: '1px solid rgba(45, 90, 63, 0.06)',
           }}
         >
+          {/* Total line — labeled as "Total" for joint profiles */}
           <div className="flex items-center justify-between text-sm">
             <div>
+              {memberNutritionTargets && memberNutritionTargets.length > 0 && (
+                <span className="text-[10px] font-semibold uppercase tracking-wider mr-1.5" style={{ color: 'var(--color-sage)' }}>
+                  Total
+                </span>
+              )}
               <span style={{ color: 'var(--color-clay-muted)' }}>Calories: </span>
               <span className="font-bold" style={{ color: 'var(--color-clay)' }}>
                 {Math.round(meal.calories)}
@@ -104,9 +136,42 @@ export function MealCard({ meal, onSwap, onRecipeLoad, swapping = false }: MealC
           <div className="mt-1.5 flex items-center justify-between text-xs" style={{ color: 'var(--color-clay-muted)' }}>
             <span>{formatMacros(meal.protein, meal.carbs, meal.fats)}</span>
             {meal.portion_size && (
-              <span>Serving: <span className="font-medium" style={{ color: 'var(--color-clay-light)' }}>{meal.portion_size}</span></span>
+              <span>
+                {memberNutritionTargets && memberNutritionTargets.length > 0 ? 'Total portion' : 'Serving'}:{' '}
+                <span className="font-medium" style={{ color: 'var(--color-clay-light)' }}>{meal.portion_size}</span>
+              </span>
             )}
           </div>
+
+          {/* Per-person breakdown for joint profiles */}
+          {memberNutritionTargets && memberNutritionTargets.length > 0 && meal.portion_size && (
+            <div
+              className="mt-2.5 pt-2.5 space-y-1.5"
+              style={{ borderTop: '1px dashed rgba(45, 90, 63, 0.10)' }}
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-sage)' }}>
+                Per Person Serving
+              </p>
+              {memberNutritionTargets.map((member) => (
+                <div
+                  key={member.profile_id}
+                  className="rounded-lg px-2.5 py-1.5"
+                  style={{
+                    background: member.is_primary ? 'rgba(212, 148, 10, 0.04)' : 'rgba(45, 90, 63, 0.02)',
+                  }}
+                >
+                  <div className="flex items-baseline gap-1.5 text-xs">
+                    <span className="font-semibold shrink-0" style={{ color: 'var(--color-emerald-deep)' }}>
+                      {member.profile_name}:
+                    </span>
+                    <span className="font-medium" style={{ color: 'var(--color-clay-light)' }}>
+                      {scalePortionString(meal.portion_size!, member.share_ratio)}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Expandable Details */}
