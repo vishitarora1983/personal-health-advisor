@@ -60,10 +60,28 @@ async def lifespan(app: FastAPI):
             ))
         print("✓ Migrated user_profiles: added 'is_joint' column")
 
+    if "foods_to_include" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE user_profiles ADD COLUMN foods_to_include TEXT"
+            ))
+        print("✓ Migrated user_profiles: added 'foods_to_include' column")
+
+    if "meals_to_repeat" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE user_profiles ADD COLUMN meals_to_repeat INTEGER DEFAULT 4 NOT NULL"
+            ))
+        print("✓ Migrated user_profiles: added 'meals_to_repeat' column")
+
     print("✓ Database tables created successfully")
     db_type = settings.DATABASE_URL.split("://")[0] if "://" in settings.DATABASE_URL else "sqlite"
     print(f"  Database type: {db_type}")
-    print(f"✓ OpenAI API Key configured: {'Yes' if settings.OPENAI_API_KEY else 'No'}")
+    provider = settings.LLM_PROVIDER
+    if provider == "openai":
+        print(f"✓ LLM provider: OpenAI (model={settings.OPENAI_MODEL})")
+    else:
+        print(f"✓ LLM provider: OCI GenAI (endpoint={settings.OCI_GENAI_ENDPOINT})")
 
     yield
 

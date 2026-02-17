@@ -8,10 +8,10 @@ import { Input } from '@/components/ui/Input';
 import { Select, SelectOption } from '@/components/ui/Select';
 import { useToast } from '@/components/ui/Toast';
 import { Spinner } from '@/components/ui/LoadingSkeleton';
-import { getProfile, createProfile, updateProfile } from '@/lib/api';
+import { getProfile, createProfile, updateProfile, getJointMembers } from '@/lib/api';
 import { useProfile } from '@/lib/ProfileContext';
 import { getErrorMessage } from '@/lib/utils';
-import type { ProfileFormData } from '@/types';
+import type { ProfileFormData, JointProfileMember } from '@/types';
 import {
   User,
   Heart,
@@ -19,6 +19,10 @@ import {
   ChefHat,
   Sparkles,
   Info,
+  Baby,
+  Users,
+  Crown,
+  ArrowLeft,
 } from 'lucide-react';
 
 export default function ProfilePage() {
@@ -37,13 +41,17 @@ function ProfilePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const toast = useToast();
-  const { activeProfileId, activeProfile, switchProfile, refreshProfiles } = useProfile();
+  const { activeProfileId, activeProfile, profiles, switchProfile, refreshProfiles } = useProfile();
 
   const isNewMode = searchParams.get('new') === 'true';
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [jointMembers, setJointMembers] = useState<JointProfileMember[]>([]);
+  const [selectedCookId, setSelectedCookId] = useState<number | null>(null);
+  const [cookProfile, setCookProfile] = useState<{ name: string; cooking_skill: string; max_cook_time: number } | null>(null);
+  const [loadingCook, setLoadingCook] = useState(false);
   const [formData, setFormData] = useState<ProfileFormData>({
     name: '',
     age: 30,
@@ -57,12 +65,14 @@ function ProfilePageContent() {
     diet_type: 'none',
     allergies: [],
     foods_to_avoid: '',
+    foods_to_include: '',
     spice_tolerance: 'medium',
     cooking_skill: 'intermediate',
     max_cook_time: 45,
     cuisines: [],
     meals_per_day: ['breakfast', 'lunch', 'dinner'],
     snacks_per_day: 1,
+    meals_to_repeat: 4,
   });
 
   useEffect(() => {
@@ -91,13 +101,24 @@ function ProfilePageContent() {
             diet_type: profile.diet_type,
             allergies: profile.allergies,
             foods_to_avoid: profile.foods_to_avoid,
+            foods_to_include: profile.foods_to_include || '',
             spice_tolerance: profile.spice_tolerance,
             cooking_skill: profile.cooking_skill,
             max_cook_time: profile.max_cook_time,
             cuisines: profile.cuisines,
             meals_per_day: profile.meals_per_day,
             snacks_per_day: profile.snacks_per_day,
+            meals_to_repeat: profile.meals_to_repeat ?? 4,
           });
+          // Fetch joint members if this is a joint profile
+          if (profile.is_joint) {
+            try {
+              const members = await getJointMembers(activeProfileId);
+              setJointMembers(members);
+            } catch {
+              setJointMembers([]);
+            }
+          }
           setIsEditing(true);
         } catch {
           // Profile not found, create mode
@@ -145,6 +166,61 @@ function ProfilePageContent() {
       return { ...prev, [field]: newValues };
     });
   };
+
+  // Kid profile detection
+  const isKidProfile = formData.age < 18;
+
+  // When age drops below 18, reset household_size to 1 and clear stale medical goals
+  useEffect(() => {
+    if (isKidProfile) {
+      setFormData(prev => {
+        const adultOnlyGoals = ['diabetes_management', 'heart_health', 'high_protein', 'muscle_building'];
+        const filtered = prev.medical_goals.filter(g => !adultOnlyGoals.includes(g));
+        if (prev.household_size !== 1 || filtered.length !== prev.medical_goals.length) {
+          return { ...prev, household_size: 1, medical_goals: filtered };
+        }
+        return prev;
+      });
+    } else {
+      // Switching back to adult — clear kid-only goals and reset cook selection
+      setFormData(prev => {
+        const kidOnlyGoals = ['healthy_growth', 'brain_development', 'bone_health', 'immune_support', 'picky_eater_support'];
+        const filtered = prev.medical_goals.filter(g => !kidOnlyGoals.includes(g));
+        if (filtered.length !== prev.medical_goals.length) {
+          return { ...prev, medical_goals: filtered };
+        }
+        return prev;
+      });
+      setSelectedCookId(null);
+      setCookProfile(null);
+    }
+  }, [isKidProfile]);
+
+  // Handle cook selection for kid profiles
+  const handleCookSelect = async (profileId: number) => {
+    setSelectedCookId(profileId);
+    setLoadingCook(true);
+    try {
+      const profile = await getProfile(profileId);
+      setCookProfile({
+        name: profile.name,
+        cooking_skill: profile.cooking_skill,
+        max_cook_time: profile.max_cook_time,
+      });
+      setFormData(prev => ({
+        ...prev,
+        cooking_skill: profile.cooking_skill as ProfileFormData['cooking_skill'],
+        max_cook_time: profile.max_cook_time,
+      }));
+    } catch {
+      toast.error('Failed to load cooking preferences');
+    } finally {
+      setLoadingCook(false);
+    }
+  };
+
+  // Available cooks for kid profiles: individual (non-joint) profiles, excluding current
+  const availableCooks = profiles.filter(p => !p.is_joint && p.id !== activeProfileId);
 
   if (loading) {
     return (
@@ -205,13 +281,22 @@ function ProfilePageContent() {
     { value: 'advanced', label: 'Advanced' },
   ];
 
-  const medicalGoalsOptions = [
-    'diabetes_management',
-    'heart_health',
-    'high_protein',
-    'muscle_building',
-    'general_wellness',
-  ];
+  const medicalGoalsOptions = isKidProfile
+    ? [
+        'healthy_growth',
+        'brain_development',
+        'bone_health',
+        'immune_support',
+        'picky_eater_support',
+        'general_wellness',
+      ]
+    : [
+        'diabetes_management',
+        'heart_health',
+        'high_protein',
+        'muscle_building',
+        'general_wellness',
+      ];
 
   const allergiesOptions = [
     'peanuts',
@@ -309,6 +394,192 @@ function ProfilePageContent() {
     </label>
   );
 
+  // ─── Joint Profile View ───────────────────────────────────────────
+  if (isEditing && activeProfile?.is_joint) {
+    const primaryMember = jointMembers.find((m) => m.is_primary);
+    const otherMembers = jointMembers.filter((m) => !m.is_primary);
+    const profileType = activeProfile.profile_type || 'adult';
+    const typeConfig = {
+      adult: { label: 'Adult', icon: User, bg: 'rgba(45, 90, 63, 0.08)', color: 'var(--color-emerald)', border: 'rgba(45, 90, 63, 0.18)' },
+      kid: { label: 'Kid', icon: Baby, bg: 'rgba(212, 148, 10, 0.08)', color: 'var(--color-amber)', border: 'rgba(212, 148, 10, 0.18)' },
+      family: { label: 'Family', icon: Users, bg: 'rgba(139, 92, 246, 0.08)', color: 'rgb(139, 92, 246)', border: 'rgba(139, 92, 246, 0.18)' },
+    } as const;
+    const tc = typeConfig[profileType as keyof typeof typeConfig] || typeConfig.adult;
+    const TypeIcon = tc.icon;
+
+    return (
+      <div className="max-w-2xl mx-auto">
+        {/* Page Header */}
+        <div className="mb-10 animate-fade-in">
+          <div className="flex items-center gap-3 mb-3">
+            <div
+              className="flex items-center justify-center w-8 h-8 rounded-lg"
+              style={{
+                background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.6), rgba(139, 92, 246, 0.8))',
+                boxShadow: '0 0 12px rgba(139, 92, 246, 0.20)',
+              }}
+            >
+              <Users className="h-4 w-4 text-white" />
+            </div>
+            <p
+              className="text-xs font-semibold tracking-widest uppercase"
+              style={{ color: 'rgb(139, 92, 246)' }}
+            >
+              Joint Profile
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <h1
+              className="text-4xl font-normal tracking-tight"
+              style={{
+                fontFamily: 'var(--font-display), serif',
+                color: 'var(--color-emerald-deep)',
+              }}
+            >
+              {activeProfile.name}
+            </h1>
+            <span
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold"
+              style={{ background: tc.bg, color: tc.color, border: `1px solid ${tc.border}` }}
+            >
+              <TypeIcon className="h-3.5 w-3.5" />
+              {tc.label}
+            </span>
+          </div>
+          <p className="mt-2 text-base" style={{ color: 'var(--color-clay-muted)' }}>
+            All preferences are inherited from the primary member. Nutrition targets are combined across all members.
+          </p>
+          <div className="accent-line w-24 mt-5" />
+        </div>
+
+        {/* Members Card */}
+        <Card className="animate-slide-up">
+          <Card.Header>
+            <div className="flex items-start gap-4">
+              <div
+                className="flex items-center justify-center w-10 h-10 rounded-xl shrink-0"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(45, 90, 63, 0.08), rgba(127, 168, 138, 0.05))',
+                  border: '1px solid rgba(45, 90, 63, 0.10)',
+                }}
+              >
+                <span style={{ color: 'var(--color-emerald)' }}>
+                  <Users className="h-5 w-5" />
+                </span>
+              </div>
+              <div>
+                <h2
+                  className="text-xl font-semibold"
+                  style={{ fontFamily: 'var(--font-display), serif', color: 'var(--color-emerald-deep)' }}
+                >
+                  Members
+                </h2>
+                <p className="text-sm mt-0.5" style={{ color: 'var(--color-clay-muted)' }}>
+                  {jointMembers.length} {jointMembers.length === 1 ? 'person' : 'people'} in this profile
+                </p>
+              </div>
+            </div>
+          </Card.Header>
+          <Card.Body>
+            <div className="space-y-3">
+              {/* Primary Member */}
+              {primaryMember && (
+                <div
+                  className="flex items-center gap-4 p-4 rounded-xl"
+                  style={{
+                    background: 'rgba(212, 148, 10, 0.05)',
+                    border: '1px solid rgba(212, 148, 10, 0.15)',
+                  }}
+                >
+                  <div
+                    className="flex items-center justify-center w-10 h-10 rounded-full shrink-0"
+                    style={{
+                      background: 'linear-gradient(135deg, var(--color-amber), var(--color-amber-warm))',
+                      boxShadow: '0 2px 8px rgba(212, 148, 10, 0.25)',
+                    }}
+                  >
+                    <Crown className="h-5 w-5 text-white" />
+                  </div>
+                  <div className="flex-1">
+                    <p
+                      className="font-semibold text-base"
+                      style={{ color: 'var(--color-emerald-deep)', fontFamily: 'var(--font-display), serif' }}
+                    >
+                      {primaryMember.profile_name}
+                    </p>
+                    <p className="text-xs font-medium mt-0.5" style={{ color: 'var(--color-amber)' }}>
+                      Primary Member — preferences are inherited from this profile
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Other Members */}
+              {otherMembers.map((member) => (
+                <div
+                  key={member.profile_id}
+                  className="flex items-center gap-4 p-4 rounded-xl"
+                  style={{
+                    background: 'rgba(45, 90, 63, 0.03)',
+                    border: '1px solid rgba(45, 90, 63, 0.08)',
+                  }}
+                >
+                  <div
+                    className="flex items-center justify-center w-10 h-10 rounded-full shrink-0"
+                    style={{
+                      background: 'linear-gradient(135deg, var(--color-emerald), var(--color-emerald-light))',
+                      boxShadow: '0 2px 8px rgba(45, 90, 63, 0.15)',
+                    }}
+                  >
+                    <User className="h-5 w-5 text-white" />
+                  </div>
+                  <div className="flex-1">
+                    <p
+                      className="font-semibold text-base"
+                      style={{ color: 'var(--color-emerald-deep)', fontFamily: 'var(--font-display), serif' }}
+                    >
+                      {member.profile_name}
+                    </p>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--color-clay-muted)' }}>
+                      Member
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card.Body>
+        </Card>
+
+        {/* Info callout */}
+        <div
+          className="flex items-start gap-3 p-4 rounded-xl mt-7 animate-slide-up stagger-1"
+          style={{
+            background: 'rgba(45, 90, 63, 0.04)',
+            border: '1px solid rgba(45, 90, 63, 0.10)',
+          }}
+        >
+          <Info className="h-5 w-5 shrink-0 mt-0.5" style={{ color: 'var(--color-emerald)' }} />
+          <p className="text-sm" style={{ color: 'var(--color-clay-muted)' }}>
+            To change dietary preferences, cooking settings, or nutrition targets, edit the individual member profiles directly.
+          </p>
+        </div>
+
+        {/* Back button */}
+        <div className="flex justify-start pt-6 pb-8 animate-slide-up stagger-2">
+          <Button
+            variant="outline"
+            size="lg"
+            onClick={() => router.push('/meal-plan')}
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Meal Plan
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Individual Profile Form ─────────────────────────────────────
   return (
     <div className="max-w-4xl mx-auto">
       {/* Page Header */}
@@ -346,27 +617,6 @@ function ProfilePageContent() {
         <div className="accent-line w-24 mt-5" />
       </div>
 
-      {/* Joint profile guard banner */}
-      {isEditing && activeProfile?.is_joint && (
-        <div
-          className="flex items-start gap-3 p-4 rounded-xl mb-7 animate-fade-in"
-          style={{
-            background: 'rgba(212, 148, 10, 0.06)',
-            border: '1px solid rgba(212, 148, 10, 0.15)',
-          }}
-        >
-          <Info className="h-5 w-5 shrink-0 mt-0.5" style={{ color: 'var(--color-amber)' }} />
-          <div>
-            <p className="text-sm font-semibold" style={{ color: 'var(--color-amber-warm)' }}>
-              Joint Profile
-            </p>
-            <p className="text-sm mt-0.5" style={{ color: 'var(--color-clay-muted)' }}>
-              This is a joint profile. Settings are inherited from the primary member. Household size is auto-managed based on the number of members.
-            </p>
-          </div>
-        </div>
-      )}
-
       <form onSubmit={handleSubmit} className="space-y-7">
         {/* Profile Name */}
         <Card className="animate-slide-up">
@@ -380,6 +630,61 @@ function ProfilePageContent() {
               fullWidth
               helperText="Give this profile a name (e.g., your name or &quot;My Diet Plan&quot;)"
             />
+            {/* Auto-detected profile type badge */}
+            <div className="mt-3 flex items-center gap-2">
+              <span
+                className="text-xs font-medium"
+                style={{ color: 'var(--color-clay-muted)' }}
+              >
+                Profile type:
+              </span>
+              {(() => {
+                // For existing joint profiles, use server-computed value (checks all member ages)
+                // For individual profiles (new or editing), derive from the form age field
+                const profileType = (isEditing && activeProfile?.is_joint)
+                  ? (activeProfile.profile_type || 'adult')
+                  : (formData.age >= 18 ? 'adult' : 'kid');
+                const config = {
+                  adult: {
+                    label: 'Adult',
+                    icon: User,
+                    bg: 'rgba(45, 90, 63, 0.08)',
+                    color: 'var(--color-emerald)',
+                    border: 'rgba(45, 90, 63, 0.18)',
+                  },
+                  kid: {
+                    label: 'Kid',
+                    icon: Baby,
+                    bg: 'rgba(212, 148, 10, 0.08)',
+                    color: 'var(--color-amber)',
+                    border: 'rgba(212, 148, 10, 0.18)',
+                  },
+                  family: {
+                    label: 'Family',
+                    icon: Users,
+                    bg: 'rgba(139, 92, 246, 0.08)',
+                    color: 'rgb(139, 92, 246)',
+                    border: 'rgba(139, 92, 246, 0.18)',
+                  },
+                } as const;
+                const c = config[profileType];
+                const Icon = c.icon;
+                return (
+                  <span
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
+                    style={{
+                      background: c.bg,
+                      color: c.color,
+                      border: `1px solid ${c.border}`,
+                      transitionDuration: 'var(--duration-normal)',
+                    }}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {c.label}
+                  </span>
+                );
+              })()}
+            </div>
           </Card.Body>
         </Card>
 
@@ -399,7 +704,7 @@ function ProfilePageContent() {
                 type="number"
                 value={formData.age}
                 onChange={(e) => setFormData({ ...formData, age: Number(e.target.value) })}
-                min={13}
+                min={1}
                 max={120}
                 required
                 fullWidth
@@ -417,7 +722,7 @@ function ProfilePageContent() {
                 type="number"
                 value={formData.height_cm}
                 onChange={(e) => setFormData({ ...formData, height_cm: Number(e.target.value) })}
-                min={100}
+                min={50}
                 max={250}
                 required
                 fullWidth
@@ -427,7 +732,7 @@ function ProfilePageContent() {
                 type="number"
                 value={formData.weight_kg}
                 onChange={(e) => setFormData({ ...formData, weight_kg: Number(e.target.value) })}
-                min={30}
+                min={3}
                 max={300}
                 required
                 fullWidth
@@ -440,7 +745,7 @@ function ProfilePageContent() {
                 required
                 fullWidth
               />
-              {!(isEditing && activeProfile?.is_joint) && (
+              {!isKidProfile && (
                 <Input
                   label="Household Size"
                   type="number"
@@ -541,6 +846,14 @@ function ProfilePageContent() {
                 helperText="Comma-separated list of foods you dislike"
                 fullWidth
               />
+              <Input
+                label="Foods to Include"
+                type="text"
+                value={formData.foods_to_include ?? ''}
+                onChange={(e) => setFormData({ ...formData, foods_to_include: e.target.value })}
+                helperText="Comma-separated list of foods you'd like in your meal plan"
+                fullWidth
+              />
               <Select
                 label="Spice Tolerance"
                 options={spiceToleranceOptions}
@@ -552,36 +865,154 @@ function ProfilePageContent() {
           </Card.Body>
         </Card>
 
-        {/* Section 4: Cooking Preferences */}
+        {/* Section 4: Cooking / Meal Preferences */}
         <Card className="animate-slide-up stagger-4">
           <Card.Header>
             <SectionHeader
               icon={ChefHat}
-              title="Cooking Preferences"
-              description="Your skill level, time, and cuisine preferences"
+              title={isKidProfile ? 'Meal Preferences' : 'Cooking Preferences'}
+              description={isKidProfile ? 'Meal structure and who cooks for this profile' : 'Your skill level, time, and cuisine preferences'}
             />
           </Card.Header>
           <Card.Body>
             <div className="space-y-5">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <Select
-                  label="Cooking Skill"
-                  options={cookingSkillOptions}
-                  value={formData.cooking_skill}
-                  onChange={(e) => setFormData({ ...formData, cooking_skill: e.target.value as ProfileFormData['cooking_skill'] })}
-                  fullWidth
-                />
-                <Input
-                  label="Max Cook Time (minutes)"
-                  type="number"
-                  value={formData.max_cook_time}
-                  onChange={(e) => setFormData({ ...formData, max_cook_time: Number(e.target.value) })}
-                  min={10}
-                  max={120}
-                  helperText="Per meal"
-                  fullWidth
-                />
-              </div>
+              {/* ── Kid: Cook selector ── */}
+              {isKidProfile ? (
+                <>
+                  {/* Who cooks for you? */}
+                  <div>
+                    <label
+                      className="block text-sm font-semibold mb-2"
+                      style={{ color: 'var(--color-emerald-deep)' }}
+                    >
+                      Who cooks for you?
+                    </label>
+                    <p className="text-xs mb-3" style={{ color: 'var(--color-clay-muted)' }}>
+                      Select a grown-up whose cooking preferences will be used for meal planning
+                    </p>
+                    {availableCooks.length > 0 ? (
+                      <div className="space-y-2">
+                        {availableCooks.map((cook) => {
+                          const isSelected = selectedCookId === cook.id;
+                          return (
+                            <button
+                              key={cook.id}
+                              type="button"
+                              onClick={() => handleCookSelect(cook.id)}
+                              disabled={loadingCook}
+                              className="w-full flex items-center gap-3 p-3.5 rounded-xl text-left transition-all"
+                              style={{
+                                background: isSelected
+                                  ? 'rgba(45, 90, 63, 0.06)'
+                                  : 'var(--surface-primary)',
+                                border: isSelected
+                                  ? '1.5px solid var(--color-emerald)'
+                                  : '1.5px solid var(--surface-glass-border)',
+                                boxShadow: isSelected
+                                  ? '0 2px 8px rgba(45, 90, 63, 0.12)'
+                                  : 'var(--shadow-sm)',
+                                transitionDuration: 'var(--duration-normal)',
+                              }}
+                            >
+                              <div
+                                className="flex items-center justify-center w-9 h-9 rounded-full shrink-0"
+                                style={{
+                                  background: isSelected
+                                    ? 'linear-gradient(135deg, var(--color-emerald), var(--color-emerald-light))'
+                                    : 'rgba(45, 90, 63, 0.08)',
+                                }}
+                              >
+                                <User className="h-4 w-4" style={{ color: isSelected ? 'white' : 'var(--color-emerald)' }} />
+                              </div>
+                              <span
+                                className="text-sm font-medium"
+                                style={{ color: isSelected ? 'var(--color-emerald-deep)' : 'var(--color-clay)' }}
+                              >
+                                {cook.name}
+                              </span>
+                              {isSelected && (
+                                <span className="ml-auto text-xs font-semibold" style={{ color: 'var(--color-emerald)' }}>
+                                  Selected
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div
+                        className="rounded-xl p-4 text-sm"
+                        style={{
+                          background: 'rgba(212, 148, 10, 0.06)',
+                          border: '1px solid rgba(212, 148, 10, 0.15)',
+                          color: 'var(--color-clay-muted)',
+                        }}
+                      >
+                        No individual profiles found. Create an adult profile first.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Inherited cooking values — shown after selection */}
+                  {cookProfile && (
+                    <div
+                      className="rounded-xl p-4 space-y-3 animate-fade-in"
+                      style={{
+                        background: 'rgba(45, 90, 63, 0.04)',
+                        border: '1px solid rgba(45, 90, 63, 0.10)',
+                      }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Info className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
+                        <p className="text-xs font-semibold" style={{ color: 'var(--color-emerald-deep)' }}>
+                          Inheriting cooking preferences from {cookProfile.name}
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--color-sage)' }}>
+                            Cooking Skill
+                          </p>
+                          <p className="text-sm font-medium capitalize" style={{ color: 'var(--color-clay)' }}>
+                            {cookProfile.cooking_skill}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--color-sage)' }}>
+                            Max Cook Time
+                          </p>
+                          <p className="text-sm font-medium" style={{ color: 'var(--color-clay)' }}>
+                            {cookProfile.max_cook_time} minutes
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                /* ── Adult: Normal cooking fields ── */
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <Select
+                    label="Cooking Skill"
+                    options={cookingSkillOptions}
+                    value={formData.cooking_skill}
+                    onChange={(e) => setFormData({ ...formData, cooking_skill: e.target.value as ProfileFormData['cooking_skill'] })}
+                    fullWidth
+                  />
+                  <Input
+                    label="Max Cook Time (minutes)"
+                    type="number"
+                    value={formData.max_cook_time}
+                    onChange={(e) => setFormData({ ...formData, max_cook_time: Number(e.target.value) })}
+                    min={10}
+                    max={120}
+                    helperText="Per meal"
+                    fullWidth
+                  />
+                </div>
+              )}
+
+              {/* ── Shared fields (both kid and adult) ── */}
               <div>
                 <label
                   className="block text-sm font-semibold mb-3"
@@ -647,6 +1078,16 @@ function ProfilePageContent() {
                 onChange={(e) => setFormData({ ...formData, snacks_per_day: Number(e.target.value) })}
                 min={0}
                 max={3}
+                fullWidth
+              />
+              <Input
+                label="Meals to Repeat Per Week"
+                type="number"
+                value={formData.meals_to_repeat ?? 4}
+                onChange={(e) => setFormData({ ...formData, meals_to_repeat: Number(e.target.value) })}
+                min={0}
+                max={7}
+                helperText="Number of lunch/dinner meals to repeat across the week (0 = all unique)"
                 fullWidth
               />
             </div>

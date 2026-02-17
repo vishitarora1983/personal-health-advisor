@@ -5,7 +5,7 @@ import { RefreshCw, Flame, Drumstick, Wheat, Droplets, Crown } from 'lucide-reac
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { MealCard } from './MealCard';
-import type { DailyPlan, Meal, NutritionTargets, MemberNutritionTargets } from '@/types';
+import type { DailyPlan, Meal, NutritionTargets, MemberNutritionTargets, KidProfile } from '@/types';
 
 interface DayColumnProps {
   dailyPlan: DailyPlan;
@@ -13,10 +13,19 @@ interface DayColumnProps {
   nutritionTargets?: NutritionTargets | null;
   memberNutritionTargets?: MemberNutritionTargets[] | null;
   onSwapMeal: (mealId: number) => void;
+  onCustomReplace: (mealId: number, description: string) => Promise<string[] | null>;
   onRegenerateDay: (dayIndex: number) => void;
   onRecipeLoad?: (mealId: number) => Promise<Meal>;
+  onCopyMeal?: (sourceMealId: number, targetMealId: number) => Promise<void>;
+  onShareWithKids?: (mealId: number, kidIds: number[]) => Promise<void>;
+  kidProfiles?: KidProfile[];
   swappingMealId?: number;
+  customReplacingMealId?: number;
+  copyingMealId?: number;
+  sharingMealId?: number;
   regeneratingDay?: boolean;
+  allDays?: DailyPlan[];
+  repeatedDishNames?: Set<string>;
 }
 
 /**
@@ -28,10 +37,19 @@ export function DayColumn({
   nutritionTargets,
   memberNutritionTargets,
   onSwapMeal,
+  onCustomReplace,
   onRegenerateDay,
   onRecipeLoad,
+  onCopyMeal,
+  onShareWithKids,
+  kidProfiles,
   swappingMealId,
+  customReplacingMealId,
+  copyingMealId,
+  sharingMealId,
   regeneratingDay = false,
+  allDays,
+  repeatedDishNames,
 }: DayColumnProps) {
   const hasMembers = memberNutritionTargets && memberNutritionTargets.length > 0;
 
@@ -182,9 +200,18 @@ export function DayColumn({
             key={meal.id}
             meal={meal}
             onSwap={onSwapMeal}
+            onCustomReplace={onCustomReplace}
             onRecipeLoad={onRecipeLoad}
+            onCopyMeal={onCopyMeal}
+            onShareWithKids={onShareWithKids}
+            kidProfiles={kidProfiles}
             swapping={swappingMealId === meal.id}
+            customReplacing={customReplacingMealId === meal.id}
+            copyingMeal={copyingMealId === meal.id}
+            sharingMeal={sharingMealId === meal.id}
             memberNutritionTargets={memberNutritionTargets}
+            allDays={allDays}
+            isRepeat={repeatedDishNames?.has(meal.dish_name.toLowerCase().trim()) ?? false}
           />
         ))}
       </div>

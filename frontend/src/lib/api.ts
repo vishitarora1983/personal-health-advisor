@@ -7,6 +7,8 @@ import type {
   JointProfileCreate,
   JointProfileMember,
   MemberNutritionTargets,
+  KidProfile,
+  KidShareInfo,
   WeeklyPlan,
   DailyPlan,
   Meal,
@@ -129,6 +131,26 @@ export async function getMemberNutritionTargets(profileId: number): Promise<Memb
   return response.data;
 }
 
+/**
+ * Get all kid profiles (age < 18, non-joint).
+ */
+export async function getKidProfiles(): Promise<KidProfile[]> {
+  const response = await apiClient.get<KidProfile[]>('/profile/kids');
+  return response.data;
+}
+
+/**
+ * Share (or unshare) a meal with kid profiles.
+ * Returns the updated meal with share info.
+ */
+export async function shareWithKids(mealId: number, kidProfileIds: number[]): Promise<Meal> {
+  const response = await apiClient.post<{ message: string; shares: KidShareInfo[]; updated_meal: Meal }>(
+    `/meals/${mealId}/share-with-kids`,
+    { kid_profile_ids: kidProfileIds }
+  );
+  return response.data.updated_meal;
+}
+
 // ============================================================================
 // MEAL PLAN ENDPOINTS
 // ============================================================================
@@ -165,6 +187,24 @@ export async function generateRecipe(mealId: number): Promise<Meal> {
 export async function swapMeal(mealId: number, reason?: string): Promise<Meal> {
   const requestData: SwapMealRequest = reason ? { reason } : {};
   const response = await apiClient.post<{ message: string; new_meal: Meal }>(`/meals/${mealId}/swap`, requestData);
+  return response.data.new_meal;
+}
+
+/**
+ * Replace a meal with a user-described custom dish.
+ * Backend returns { message, new_meal, warnings }, we return meal + warnings.
+ */
+export async function replaceWithCustomMeal(mealId: number, description: string): Promise<{ meal: Meal; warnings: string[] | null }> {
+  const response = await apiClient.post<{ message: string; new_meal: Meal; warnings: string[] | null }>(`/meals/${mealId}/replace-custom`, { description });
+  return { meal: response.data.new_meal, warnings: response.data.warnings };
+}
+
+/**
+ * Copy a meal's data to another meal slot. No AI call — instant.
+ * Returns the updated target meal.
+ */
+export async function copyMealTo(sourceMealId: number, targetMealId: number): Promise<Meal> {
+  const response = await apiClient.post<{ message: string; new_meal: Meal }>(`/meals/${sourceMealId}/copy-to`, { target_meal_id: targetMealId });
   return response.data.new_meal;
 }
 

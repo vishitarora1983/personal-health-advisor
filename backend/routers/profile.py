@@ -24,11 +24,44 @@ from services.nutrition_calculator import calculate_targets
 router = APIRouter(prefix="/profile", tags=["Profile"])
 
 
+def _compute_profile_type(profile: UserProfile, db: Session) -> str:
+    """Derive profile_type from age (and member ages for joint profiles)."""
+    if not profile.is_joint:
+        return "adult" if profile.age >= 18 else "kid"
+    # Joint profile: check if any member is a minor
+    assocs = db.query(JointProfileMember).filter(
+        JointProfileMember.joint_profile_id == profile.id
+    ).all()
+    member_ids = [a.member_profile_id for a in assocs]
+    members = db.query(UserProfile).filter(UserProfile.id.in_(member_ids)).all()
+    has_minor = any(m.age < 18 for m in members)
+    return "family" if has_minor else "adult"
+
+
+def _profile_response(profile: UserProfile, db: Session) -> ProfileResponse:
+    """Build a ProfileResponse with the correct profile_type."""
+    resp = ProfileResponse.model_validate(profile)
+    resp.profile_type = _compute_profile_type(profile, db)
+    return resp
+
+
 @router.get("", response_model=List[ProfileListItem], status_code=status.HTTP_200_OK)
 def list_profiles(db: Session = Depends(get_db)):
     """Return all profiles (lightweight list)."""
     profiles = db.query(UserProfile).order_by(UserProfile.created_at).all()
     return profiles
+
+
+@router.get("/kids", status_code=status.HTTP_200_OK)
+def list_kid_profiles(db: Session = Depends(get_db)):
+    """Return all non-joint profiles where age < 18."""
+    kids = (
+        db.query(UserProfile)
+        .filter(UserProfile.age < 18, UserProfile.is_joint == False)
+        .order_by(UserProfile.name)
+        .all()
+    )
+    return [{"id": k.id, "name": k.name} for k in kids]
 
 
 @router.get("/{profile_id}", response_model=ProfileResponse, status_code=status.HTTP_200_OK)
@@ -42,7 +75,7 @@ def get_profile(profile_id: int, db: Session = Depends(get_db)):
             detail=f"Profile with id {profile_id} not found."
         )
 
-    return profile
+    return _profile_response(profile, db)
 
 
 @router.post("", response_model=ProfileResponse, status_code=status.HTTP_201_CREATED)
@@ -64,7 +97,7 @@ def create_profile(profile_data: ProfileCreate, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(new_profile)
 
-        return new_profile
+        return _profile_response(new_profile, db)
 
     except Exception as e:
         db.rollback()
@@ -100,7 +133,7 @@ def update_profile(profile_id: int, profile_update: ProfileUpdate, db: Session =
         db.commit()
         db.refresh(profile)
 
-        return profile
+        return _profile_response(profile, db)
 
     except Exception as e:
         db.rollback()
@@ -243,7 +276,7 @@ def create_joint_profile(data: JointProfileCreate, db: Session = Depends(get_db)
     db.refresh(joint)
 
     return JointProfileResponse(
-        profile=ProfileResponse.model_validate(joint),
+        profile=_profile_response(joint, db),
         members=member_responses,
     )
 

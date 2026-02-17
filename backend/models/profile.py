@@ -84,6 +84,11 @@ class UserProfile(Base):
         nullable=True,
         comment="Comma-separated or free text list of disliked foods"
     )
+    foods_to_include = Column(
+        Text,
+        nullable=True,
+        comment="Comma-separated or free text list of foods to actively include"
+    )
 
     # Cooking Preferences
     spice_tolerance = Column(
@@ -121,6 +126,12 @@ class UserProfile(Base):
         nullable=False,
         default=1,
         comment="Number of snacks per day (0-3)"
+    )
+    meals_to_repeat = Column(
+        Integer,
+        nullable=False,
+        default=4,
+        comment="Number of lunch/dinner meals to repeat across the week (0-7)"
     )
 
     # Nutritional Targets (nullable = auto-calculated from BMR/TDEE if not set)

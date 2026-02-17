@@ -14,13 +14,17 @@ import {
   generateRecipe,
   getNutritionTargets,
   getMemberNutritionTargets,
+  getKidProfiles,
+  shareWithKids,
   swapMeal,
+  replaceWithCustomMeal,
+  copyMealTo,
   regenerateDay,
   regeneratePlan,
 } from '@/lib/api';
 import { useProfile } from '@/lib/ProfileContext';
 import { getErrorMessage } from '@/lib/utils';
-import type { WeeklyPlan, Meal, NutritionTargets, MemberNutritionTargets } from '@/types';
+import type { WeeklyPlan, Meal, NutritionTargets, MemberNutritionTargets, KidProfile } from '@/types';
 
 export default function MealPlanPage() {
   const router = useRouter();
@@ -31,10 +35,14 @@ export default function MealPlanPage() {
   const [generating, setGenerating] = useState(false);
   const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan | null>(null);
   const [swappingMealId, setSwappingMealId] = useState<number | null>(null);
+  const [customReplacingMealId, setCustomReplacingMealId] = useState<number | null>(null);
   const [regeneratingDayIndex, setRegeneratingDayIndex] = useState<number | null>(null);
   const [regeneratingWeek, setRegeneratingWeek] = useState(false);
+  const [copyingMealId, setCopyingMealId] = useState<number | null>(null);
+  const [sharingMealId, setSharingMealId] = useState<number | null>(null);
   const [targets, setTargets] = useState<NutritionTargets | null>(null);
   const [memberTargets, setMemberTargets] = useState<MemberNutritionTargets[] | null>(null);
+  const [kidProfiles, setKidProfiles] = useState<KidProfile[]>([]);
 
   useEffect(() => {
     if (profileLoading) return;
@@ -78,6 +86,18 @@ export default function MealPlanPage() {
         }
       } else {
         setMemberTargets(null);
+      }
+
+      // Fetch kid profiles for share feature (only useful for adult/joint profiles)
+      if (activeProfile && (activeProfile.profile_type === 'adult' || activeProfile.profile_type === 'family' || activeProfile.is_joint)) {
+        try {
+          const kids = await getKidProfiles();
+          setKidProfiles(kids);
+        } catch {
+          setKidProfiles([]);
+        }
+      } else {
+        setKidProfiles([]);
       }
     }
 
@@ -136,6 +156,46 @@ export default function MealPlanPage() {
     }
   };
 
+  const handleCustomReplace = async (mealId: number, description: string): Promise<string[] | null> => {
+    setCustomReplacingMealId(mealId);
+    try {
+      const { meal: newMeal, warnings } = await replaceWithCustomMeal(mealId, description);
+
+      setWeeklyPlan((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          days: prev.days.map((day) => {
+            const updatedMeals = day.meals.map((meal) =>
+              meal.id === mealId ? newMeal : meal
+            );
+            const hasMatch = day.meals.some((m) => m.id === mealId);
+            if (!hasMatch) return { ...day, meals: updatedMeals };
+            return {
+              ...day,
+              meals: updatedMeals,
+              total_calories: updatedMeals.reduce((sum, m) => sum + m.calories, 0),
+              total_protein: updatedMeals.reduce((sum, m) => sum + m.protein, 0),
+              total_carbs: updatedMeals.reduce((sum, m) => sum + m.carbs, 0),
+              total_fats: updatedMeals.reduce((sum, m) => sum + m.fats, 0),
+            };
+          }),
+        };
+      });
+
+      toast.success('Meal updated with your custom dish!');
+      if (warnings && warnings.length > 0) {
+        warnings.forEach((w) => toast.info(w));
+      }
+      return warnings;
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+      return null;
+    } finally {
+      setCustomReplacingMealId(null);
+    }
+  };
+
   const handleRegenerateDay = async (dayIndex: number) => {
     if (!weeklyPlan) return;
 
@@ -187,6 +247,71 @@ export default function MealPlanPage() {
     });
 
     return updatedMeal;
+  };
+
+  const handleCopyMeal = async (sourceMealId: number, targetMealId: number) => {
+    setCopyingMealId(sourceMealId);
+    try {
+      const updatedTarget = await copyMealTo(sourceMealId, targetMealId);
+
+      setWeeklyPlan((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          days: prev.days.map((day) => {
+            const updatedMeals = day.meals.map((meal) =>
+              meal.id === targetMealId ? updatedTarget : meal
+            );
+            const hasTarget = day.meals.some((m) => m.id === targetMealId);
+            if (!hasTarget) return day;
+            return {
+              ...day,
+              meals: updatedMeals,
+              total_calories: updatedMeals.reduce((sum, m) => sum + m.calories, 0),
+              total_protein: updatedMeals.reduce((sum, m) => sum + m.protein, 0),
+              total_carbs: updatedMeals.reduce((sum, m) => sum + m.carbs, 0),
+              total_fats: updatedMeals.reduce((sum, m) => sum + m.fats, 0),
+            };
+          }),
+        };
+      });
+
+      toast.success('Meal copied successfully!');
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setCopyingMealId(null);
+    }
+  };
+
+  const handleShareWithKids = async (mealId: number, kidIds: number[]) => {
+    setSharingMealId(mealId);
+    try {
+      const updatedMeal = await shareWithKids(mealId, kidIds);
+
+      setWeeklyPlan((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          days: prev.days.map((day) => ({
+            ...day,
+            meals: day.meals.map((meal) =>
+              meal.id === mealId ? updatedMeal : meal
+            ),
+          })),
+        };
+      });
+
+      if (kidIds.length === 0) {
+        toast.success('Sharing removed');
+      } else {
+        toast.success('Meal shared with kids!');
+      }
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setSharingMealId(null);
+    }
   };
 
   if (profileLoading || loading) {
@@ -251,9 +376,16 @@ export default function MealPlanPage() {
           nutritionTargets={targets}
           memberNutritionTargets={memberTargets}
           onSwapMeal={handleSwapMeal}
+          onCustomReplace={handleCustomReplace}
           onRegenerateDay={handleRegenerateDay}
           onRecipeLoad={handleRecipeLoad}
+          onCopyMeal={handleCopyMeal}
+          onShareWithKids={kidProfiles.length > 0 ? handleShareWithKids : undefined}
+          kidProfiles={kidProfiles.length > 0 ? kidProfiles : undefined}
           swappingMealId={swappingMealId ?? undefined}
+          customReplacingMealId={customReplacingMealId ?? undefined}
+          copyingMealId={copyingMealId ?? undefined}
+          sharingMealId={sharingMealId ?? undefined}
           regeneratingDayIndex={regeneratingDayIndex ?? undefined}
         />
       )}

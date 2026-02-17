@@ -1,20 +1,27 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { DayColumn } from './DayColumn';
 import { getDayName, formatDate, isToday, parseLocalDate } from '@/lib/utils';
 import { cn } from '@/lib/utils';
-import type { WeeklyPlan, Meal, NutritionTargets, MemberNutritionTargets } from '@/types';
+import type { WeeklyPlan, DailyPlan, Meal, NutritionTargets, MemberNutritionTargets, KidProfile } from '@/types';
 
 interface WeekViewProps {
   weeklyPlan: WeeklyPlan;
   nutritionTargets?: NutritionTargets | null;
   memberNutritionTargets?: MemberNutritionTargets[] | null;
   onSwapMeal: (mealId: number) => void;
+  onCustomReplace: (mealId: number, description: string) => Promise<string[] | null>;
   onRegenerateDay: (dayIndex: number) => void;
   onRecipeLoad?: (mealId: number) => Promise<Meal>;
+  onCopyMeal?: (sourceMealId: number, targetMealId: number) => Promise<void>;
+  onShareWithKids?: (mealId: number, kidIds: number[]) => Promise<void>;
+  kidProfiles?: KidProfile[];
   swappingMealId?: number;
+  customReplacingMealId?: number;
+  copyingMealId?: number;
+  sharingMealId?: number;
   regeneratingDayIndex?: number;
 }
 
@@ -27,14 +34,37 @@ export function WeekView({
   nutritionTargets,
   memberNutritionTargets,
   onSwapMeal,
+  onCustomReplace,
   onRegenerateDay,
   onRecipeLoad,
+  onCopyMeal,
+  onShareWithKids,
+  kidProfiles,
   swappingMealId,
+  customReplacingMealId,
+  copyingMealId,
+  sharingMealId,
   regeneratingDayIndex,
 }: WeekViewProps) {
   // Default to today's tab if it exists in the plan, otherwise first day
   const todayIndex = weeklyPlan.days.findIndex((d) => isToday(d.day_date));
   const [selectedDay, setSelectedDay] = useState(todayIndex >= 0 ? todayIndex : 0);
+
+  // Detect repeated dish names across the entire week
+  const repeatedDishNames = useMemo(() => {
+    const nameCounts = new Map<string, number>();
+    for (const day of weeklyPlan.days) {
+      for (const meal of day.meals) {
+        const key = meal.dish_name.toLowerCase().trim();
+        nameCounts.set(key, (nameCounts.get(key) || 0) + 1);
+      }
+    }
+    const repeated = new Set<string>();
+    for (const [name, count] of nameCounts) {
+      if (count > 1) repeated.add(name);
+    }
+    return repeated;
+  }, [weeklyPlan.days]);
 
   const currentDay = weeklyPlan.days[selectedDay];
 
@@ -157,10 +187,19 @@ export function WeekView({
         nutritionTargets={nutritionTargets}
         memberNutritionTargets={memberNutritionTargets}
         onSwapMeal={onSwapMeal}
+        onCustomReplace={onCustomReplace}
         onRegenerateDay={onRegenerateDay}
         onRecipeLoad={onRecipeLoad}
+        onCopyMeal={onCopyMeal}
+        onShareWithKids={onShareWithKids}
+        kidProfiles={kidProfiles}
         swappingMealId={swappingMealId}
+        customReplacingMealId={customReplacingMealId}
+        copyingMealId={copyingMealId}
+        sharingMealId={sharingMealId}
         regeneratingDay={regeneratingDayIndex === selectedDay}
+        allDays={weeklyPlan.days}
+        repeatedDishNames={repeatedDishNames}
       />
     </div>
   );

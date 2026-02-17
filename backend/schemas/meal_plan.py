@@ -46,6 +46,13 @@ class MealSchema(BaseModel):
     recipe_brief: Optional[str] = Field(default=None, description="Short cooking instructions")
 
 
+class KidShareInfo(BaseModel):
+    """Info about a kid this meal has been shared with."""
+    profile_id: int
+    profile_name: str
+    scale_ratio: float
+
+
 class MealResponse(MealSchema):
     """
     Response schema for a single meal including database ID.
@@ -54,16 +61,18 @@ class MealResponse(MealSchema):
     """
     id: int = Field(description="Database ID of the meal")
     daily_plan_id: int = Field(description="Parent daily plan ID")
+    shared_with_kids: Optional[List[KidShareInfo]] = None
 
     model_config = {"from_attributes": True}
 
     @staticmethod
-    def from_orm_with_ingredients(meal_obj):
+    def from_orm_with_ingredients(meal_obj, kid_shares=None):
         """
         Convert ORM meal object to response schema, deserializing ingredients.
 
         Args:
             meal_obj: SQLAlchemy Meal model instance
+            kid_shares: Optional list of KidShareInfo dicts for this meal
 
         Returns:
             MealResponse with deserialized ingredients
@@ -92,7 +101,8 @@ class MealResponse(MealSchema):
             fiber=meal_obj.fiber,
             prep_time=meal_obj.prep_time,
             ingredients=ingredients,
-            recipe_brief=meal_obj.recipe_brief
+            recipe_brief=meal_obj.recipe_brief,
+            shared_with_kids=kid_shares,
         )
 
 
@@ -166,3 +176,53 @@ class SwapMealResponse(BaseModel):
     """
     message: str = Field(default="Meal swapped successfully")
     new_meal: MealResponse = Field(description="The replacement meal")
+
+
+class CustomMealRequest(BaseModel):
+    """
+    Request to replace a meal with a user-described custom dish.
+
+    The description is sent to AI for nutritional analysis.
+    """
+    description: str = Field(
+        min_length=3,
+        max_length=500,
+        description="Natural language meal description (e.g., 'chicken biryani with raita')"
+    )
+
+
+class CustomMealResponse(BaseModel):
+    """
+    Response after replacing a meal with a custom dish.
+
+    Returns the updated meal and any dietary warnings.
+    """
+    message: str = Field(default="Meal replaced with custom dish")
+    new_meal: MealResponse = Field(description="The custom meal with full nutritional info")
+    warnings: Optional[List[str]] = Field(
+        default=None,
+        description="Dietary warnings (allergen conflicts, diet type mismatches)"
+    )
+
+
+class CopyMealRequest(BaseModel):
+    """Request to copy a meal's data to another meal slot."""
+    target_meal_id: int = Field(description="ID of the target meal to overwrite")
+
+
+class CopyMealResponse(BaseModel):
+    """Response after successfully copying a meal."""
+    message: str = Field(default="Meal copied successfully")
+    new_meal: MealResponse = Field(description="The updated target meal with copied data")
+
+
+class ShareWithKidsRequest(BaseModel):
+    """Request to share a meal with kid profiles (or unshare)."""
+    kid_profile_ids: List[int] = Field(description="Desired set of kid profile IDs (empty = unshare all)")
+
+
+class ShareWithKidsResponse(BaseModel):
+    """Response after sharing/unsharing a meal with kids."""
+    message: str
+    shares: List[KidShareInfo]
+    updated_meal: MealResponse

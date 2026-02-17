@@ -10,6 +10,7 @@ export interface UserProfile {
   id: number;
   name: string;
   is_joint: boolean;
+  profile_type: 'adult' | 'kid' | 'family';
 
   // Basic demographic information
   age: number;
@@ -27,6 +28,7 @@ export interface UserProfile {
   diet_type: 'none' | 'vegetarian' | 'vegan' | 'keto' | 'paleo' | 'mediterranean' | 'pescatarian';
   allergies: string[];
   foods_to_avoid: string;
+  foods_to_include: string;
   spice_tolerance: 'mild' | 'medium' | 'hot';
 
   // Cooking preferences
@@ -35,6 +37,7 @@ export interface UserProfile {
   cuisines: string[];
   meals_per_day: string[];
   snacks_per_day: number;
+  meals_to_repeat: number;
 
   // Nutrition targets (can be manually overridden or auto-calculated)
   target_calories: number | null;
@@ -67,12 +70,14 @@ export interface ProfileFormData {
   diet_type: 'none' | 'vegetarian' | 'vegan' | 'keto' | 'paleo' | 'mediterranean' | 'pescatarian';
   allergies: string[];
   foods_to_avoid: string;
+  foods_to_include: string;
   spice_tolerance: 'mild' | 'medium' | 'hot';
   cooking_skill: 'beginner' | 'intermediate' | 'advanced';
   max_cook_time: number;
   cuisines: string[];
   meals_per_day: string[];
   snacks_per_day: number;
+  meals_to_repeat: number;
   target_calories?: number | null;
   target_protein?: number | null;
   target_carbs?: number | null;
@@ -138,6 +143,23 @@ export interface MemberNutritionTargets extends NutritionTargets {
   share_ratio: number;
 }
 
+/**
+ * Info about a kid a meal has been shared with.
+ */
+export interface KidShareInfo {
+  profile_id: number;
+  profile_name: string;
+  scale_ratio: number;
+}
+
+/**
+ * Lightweight kid profile for the share panel.
+ */
+export interface KidProfile {
+  id: number;
+  name: string;
+}
+
 // ============================================================================
 // MEAL PLAN TYPES
 // ============================================================================
@@ -176,6 +198,9 @@ export interface Meal {
   prep_time: number;  // minutes
   ingredients?: Ingredient[] | null;
   recipe_brief?: string | null;
+
+  // Kid sharing info (populated when meal is shared with kids)
+  shared_with_kids?: KidShareInfo[] | null;
 }
 
 /**

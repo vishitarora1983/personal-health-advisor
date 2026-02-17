@@ -22,10 +22,10 @@ class ProfileCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100, description="Profile name")
 
     # Physical Characteristics
-    age: int = Field(ge=13, le=120, description="Age in years")
+    age: int = Field(ge=1, le=120, description="Age in years")
     gender: str = Field(pattern="^(male|female|other)$", description="Biological gender")
-    height_cm: float = Field(ge=100, le=250, description="Height in centimeters")
-    weight_kg: float = Field(ge=30, le=300, description="Current weight in kilograms")
+    height_cm: float = Field(ge=50, le=250, description="Height in centimeters")
+    weight_kg: float = Field(ge=3, le=300, description="Current weight in kilograms")
     activity_level: str = Field(
         pattern="^(sedentary|lightly_active|moderately_active|very_active|extra_active)$",
         description="Physical activity level"
@@ -44,6 +44,7 @@ class ProfileCreate(BaseModel):
     )
     allergies: Optional[List[str]] = Field(default=None, description="Food allergies")
     foods_to_avoid: Optional[str] = Field(default=None, max_length=500, description="Disliked foods")
+    foods_to_include: Optional[str] = Field(default=None, max_length=500, description="Foods to actively include")
 
     # Cooking Preferences
     spice_tolerance: str = Field(
@@ -62,6 +63,7 @@ class ProfileCreate(BaseModel):
     # Meal Structure
     meals_per_day: List[str] = Field(description="Which meals to plan (breakfast, lunch, dinner)")
     snacks_per_day: int = Field(ge=0, le=3, default=1, description="Number of snacks per day")
+    meals_to_repeat: int = Field(default=4, ge=0, le=7, description="Number of meals to repeat across the week")
 
     # Manual Nutrition Targets (optional overrides)
     target_calories: Optional[int] = Field(default=None, ge=800, le=5000)
@@ -94,10 +96,10 @@ class ProfileUpdate(BaseModel):
     All fields are optional to support partial updates (PATCH semantics).
     """
     name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    age: Optional[int] = Field(default=None, ge=13, le=120)
+    age: Optional[int] = Field(default=None, ge=1, le=120)
     gender: Optional[str] = Field(default=None, pattern="^(male|female|other)$")
-    height_cm: Optional[float] = Field(default=None, ge=100, le=250)
-    weight_kg: Optional[float] = Field(default=None, ge=30, le=300)
+    height_cm: Optional[float] = Field(default=None, ge=50, le=250)
+    weight_kg: Optional[float] = Field(default=None, ge=3, le=300)
     activity_level: Optional[str] = Field(
         default=None,
         pattern="^(sedentary|lightly_active|moderately_active|very_active|extra_active)$"
@@ -111,12 +113,14 @@ class ProfileUpdate(BaseModel):
     )
     allergies: Optional[List[str]] = None
     foods_to_avoid: Optional[str] = Field(default=None, max_length=500)
+    foods_to_include: Optional[str] = Field(default=None, max_length=500)
     spice_tolerance: Optional[str] = Field(default=None, pattern="^(mild|medium|hot)$")
     cooking_skill: Optional[str] = Field(default=None, pattern="^(beginner|intermediate|advanced)$")
     max_cook_time: Optional[int] = Field(default=None, ge=10, le=120)
     cuisines: Optional[List[str]] = None
     meals_per_day: Optional[List[str]] = None
     snacks_per_day: Optional[int] = Field(default=None, ge=0, le=3)
+    meals_to_repeat: Optional[int] = Field(default=None, ge=0, le=7)
     target_calories: Optional[int] = Field(default=None, ge=800, le=5000)
     target_protein: Optional[int] = Field(default=None, ge=20, le=400)
     target_carbs: Optional[int] = Field(default=None, ge=20, le=600)
@@ -147,12 +151,14 @@ class ProfileResponse(BaseModel):
     diet_type: str
     allergies: Optional[List[str]] = None
     foods_to_avoid: Optional[str] = None
+    foods_to_include: Optional[str] = None
     spice_tolerance: str
     cooking_skill: str
     max_cook_time: int
     cuisines: Optional[List[str]] = None
     meals_per_day: List[str]
     snacks_per_day: int
+    meals_to_repeat: int = 4
     target_calories: Optional[int] = None
     target_protein: Optional[int] = None
     target_carbs: Optional[int] = None
@@ -162,6 +168,8 @@ class ProfileResponse(BaseModel):
     target_sugar: Optional[int] = None
     created_at: datetime
     updated_at: datetime
+
+    profile_type: str = "adult"
 
     model_config = {"from_attributes": True}
 

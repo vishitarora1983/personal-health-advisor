@@ -5,28 +5,33 @@ This module manages environment variables and application settings.
 All sensitive configuration is loaded from .env file.
 """
 
+from typing import Literal, Optional
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """
     Application settings loaded from environment variables.
-
-    Attributes:
-        OPENAI_API_KEY: API key for OpenAI GPT-4 integration
-        DATABASE_URL: SQLAlchemy database connection string
-        FRONTEND_URL: Frontend application URL for CORS configuration
     """
 
+    # LLM Provider Selection ("openai" or "oci")
+    LLM_PROVIDER: Literal["openai", "oci"] = "openai"
+
     # OpenAI Configuration
-    OPENAI_API_KEY: str
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_MODEL: str = "gpt-4o"
+
+    # OCI Generative AI Configuration (required only when LLM_PROVIDER=oci)
+    OCI_COMPARTMENT_ID: Optional[str] = None
+    OCI_MODEL_ID: Optional[str] = None
+    OCI_GENAI_ENDPOINT: Optional[str] = None
+    OCI_CONFIG_PROFILE: str = "DEFAULT"
 
     # Database Configuration
-    # Default to SQLite for development; use PostgreSQL for production
     DATABASE_URL: str = "sqlite:///./meal_planner.db"
 
     # Frontend Configuration
-    # Used for CORS middleware to allow cross-origin requests
     FRONTEND_URL: str = "http://localhost:3000"
 
     # Pydantic Settings Configuration
@@ -34,10 +39,9 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=True,
-        extra="ignore"  # Ignore extra environment variables
+        extra="ignore"
     )
 
 
 # Global settings instance
-# Import this in other modules: from config import settings
 settings = Settings()

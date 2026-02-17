@@ -12,10 +12,12 @@ import json
 from database import get_db
 from models.profile import UserProfile
 from models.meal_plan import WeeklyPlan, DailyPlan, Meal
+from models.meal_kid_share import MealKidShare
 from schemas.meal_plan import (
     WeeklyPlanResponse,
     DailyPlanSchema,
     MealResponse,
+    KidShareInfo,
     GenerateMealPlanRequest,
     SwapMealRequest,
     SwapMealResponse
@@ -151,11 +153,11 @@ def get_current_meal_plan(profile_id: int, db: Session = Depends(get_db)):
         profile_id: Profile ID (query param)
         db: Database session dependency
     """
-    # Get active weekly plan for this profile
+    # Get most recent active weekly plan for this profile
     weekly_plan = db.query(WeeklyPlan).filter(
         WeeklyPlan.profile_id == profile_id,
         WeeklyPlan.status == "active"
-    ).first()
+    ).order_by(WeeklyPlan.id.desc()).first()
 
     if not weekly_plan:
         raise HTTPException(
@@ -427,6 +429,21 @@ def _build_weekly_plan_response(db: Session, weekly_plan: WeeklyPlan) -> WeeklyP
         DailyPlan.weekly_plan_id == weekly_plan.id
     ).order_by(DailyPlan.day_of_week).all()
 
+    # Pre-load all kid shares for meals in this plan for efficiency
+    all_meal_ids = []
+    for dp in daily_plans:
+        for m in db.query(Meal).filter(Meal.daily_plan_id == dp.id).all():
+            all_meal_ids.append(m.id)
+
+    all_shares = db.query(MealKidShare).filter(MealKidShare.meal_id.in_(all_meal_ids)).all() if all_meal_ids else []
+    # Build a map: meal_id -> list of KidShareInfo
+    shares_map: dict[int, list[KidShareInfo]] = {}
+    kid_ids = list({s.kid_profile_id for s in all_shares})
+    kid_profiles = {p.id: p.name for p in db.query(UserProfile).filter(UserProfile.id.in_(kid_ids)).all()} if kid_ids else {}
+    for s in all_shares:
+        info = KidShareInfo(profile_id=s.kid_profile_id, profile_name=kid_profiles.get(s.kid_profile_id, ""), scale_ratio=s.scale_ratio)
+        shares_map.setdefault(s.meal_id, []).append(info)
+
     daily_plans_data = []
 
     for daily_plan in daily_plans:
@@ -435,8 +452,11 @@ def _build_weekly_plan_response(db: Session, weekly_plan: WeeklyPlan) -> WeeklyP
             Meal.daily_plan_id == daily_plan.id
         ).all()
 
-        # Convert meals to schema format
-        meals_data = [MealResponse.from_orm_with_ingredients(meal) for meal in meals]
+        # Convert meals to schema format, attaching share data
+        meals_data = [
+            MealResponse.from_orm_with_ingredients(meal, kid_shares=shares_map.get(meal.id))
+            for meal in meals
+        ]
 
         daily_plan_schema = DailyPlanSchema(
             id=daily_plan.id,
