@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import timedelta
 import json
+import re
 
 from database import get_db
 from models.profile import UserProfile
@@ -22,6 +23,31 @@ from schemas.meal_plan import (
 )
 from services.ai_meal_planner import AIMealPlanner
 from services.nutrition_calculator import calculate_targets
+
+
+def scale_portion_string(portion_size: str, ratio: float) -> str:
+    """Scale numeric quantities in a portion string by a ratio.
+
+    e.g. "4 parathas (600g total) + 100g chutney" with ratio 0.48
+       → "~1.9 parathas (~288g total) + ~48g chutney"
+    """
+    parts = re.split(r'\s*\+\s*', portion_size)
+    scaled_parts = []
+    for part in parts:
+        # Scale leading number
+        scaled = re.sub(
+            r'^(\d+\.?\d*)',
+            lambda m: f"~{round(float(m.group(1)) * ratio, 1)}",
+            part,
+        )
+        # Scale gram values in parentheses
+        scaled = re.sub(
+            r'\((\d+\.?\d*)\s*g([^)]*)\)',
+            lambda m: f"(~{round(float(m.group(1)) * ratio)}g{m.group(2)})",
+            scaled,
+        )
+        scaled_parts.append(scaled)
+    return ' + '.join(scaled_parts)
 
 
 router = APIRouter(prefix="/meals", tags=["Meals"])
@@ -475,7 +501,7 @@ def share_with_kids(
                 description=meal.description,
                 cuisine=meal.cuisine,
                 meal_type=meal.meal_type,
-                portion_size=meal.portion_size,
+                portion_size=scale_portion_string(meal.portion_size, scale_ratio) if meal.portion_size else None,
                 prep_time=meal.prep_time,
                 calories=round(meal.calories * scale_ratio, 1),
                 protein=round(meal.protein * scale_ratio, 1),

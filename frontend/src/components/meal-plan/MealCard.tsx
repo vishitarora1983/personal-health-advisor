@@ -217,7 +217,11 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
             {meal.portion_size && (
               <span>
                 {memberNutritionTargets && memberNutritionTargets.length > 0 ? 'Total portion' : 'Serving'}:{' '}
-                <span className="font-medium" style={{ color: 'var(--color-clay-light)' }}>{meal.portion_size}</span>
+                <span className="font-medium" style={{ color: 'var(--color-clay-light)' }}>
+                  {hasKidShares
+                    ? scalePortionString(meal.portion_size!, 1 + meal.shared_with_kids!.reduce((sum, k) => sum + k.scale_ratio, 0))
+                    : meal.portion_size}
+                </span>
               </span>
             )}
           </div>
