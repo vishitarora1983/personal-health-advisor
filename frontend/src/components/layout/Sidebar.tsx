@@ -9,6 +9,7 @@ import {
   UtensilsCrossed,
   ClipboardCheck,
   ShoppingCart,
+  ChefHat,
   BarChart3,
   Settings,
   Menu,
@@ -37,6 +38,7 @@ const navItems: NavItem[] = [
   { href: '/meal-plan', label: 'Meal Plan', icon: UtensilsCrossed, description: 'Weekly meals' },
   { href: '/tracking', label: 'Tracking', icon: ClipboardCheck, description: 'Daily progress' },
   { href: '/grocery', label: 'Grocery List', icon: ShoppingCart, description: 'Shopping items' },
+  { href: '/chefs-view', label: "Chef's View", icon: ChefHat, description: 'Cooking overview' },
   { href: '/dashboard', label: 'Dashboard', icon: BarChart3, description: 'Analytics' },
   { href: '/settings', label: 'Settings', icon: Settings, description: 'App settings' },
 ];
