@@ -80,13 +80,13 @@ export function WeekView({
             selectedDay === 0 ? 'opacity-0 pointer-events-none' : 'opacity-100'
           )}
           style={{
-            background: 'var(--surface-primary-solid)',
+            background: 'var(--bg-secondary)',
             boxShadow: 'var(--shadow-md)',
           }}
           disabled={selectedDay === 0}
           aria-label="Previous day"
         >
-          <ChevronLeft className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
+          <ChevronLeft className="h-4 w-4" style={{ color: 'var(--brand-green)' }} />
         </button>
 
         <button
@@ -96,13 +96,13 @@ export function WeekView({
             selectedDay === weeklyPlan.days.length - 1 ? 'opacity-0 pointer-events-none' : 'opacity-100'
           )}
           style={{
-            background: 'var(--surface-primary-solid)',
+            background: 'var(--bg-secondary)',
             boxShadow: 'var(--shadow-md)',
           }}
           disabled={selectedDay === weeklyPlan.days.length - 1}
           aria-label="Next day"
         >
-          <ChevronRight className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
+          <ChevronRight className="h-4 w-4" style={{ color: 'var(--brand-green)' }} />
         </button>
 
         {/* Tab strip */}
@@ -127,10 +127,11 @@ export function WeekView({
                 )}
                 style={{
                   background: isActive
-                    ? 'linear-gradient(135deg, var(--color-emerald-deep), var(--color-emerald))'
-                    : 'var(--surface-primary)',
-                  color: isActive ? '#fff' : 'var(--color-clay)',
-                  border: isActive ? 'none' : '1px solid var(--surface-glass-border)',
+                    ? 'linear-gradient(135deg, var(--brand-green-dark), var(--brand-green))'
+                    : 'var(--surface-glass)',
+                  /* Finding 5: #fff → 'white' to match the convention used in Button */
+                  color: isActive ? 'white' : 'var(--text-secondary)',
+                  border: isActive ? 'none' : '1px solid var(--surface-border)',
                   boxShadow: isActive ? 'var(--shadow-md)' : 'var(--shadow-sm)',
                   transitionDuration: 'var(--duration-normal)',
                   transitionTimingFunction: 'var(--ease-out-expo)',
@@ -146,7 +147,7 @@ export function WeekView({
                   <span
                     className="w-1.5 h-1.5 rounded-full"
                     style={{
-                      background: isActive ? 'var(--color-amber-glow)' : 'var(--color-amber)',
+                      background: isActive ? 'var(--brand-amber-light)' : 'var(--brand-amber)',
                     }}
                   />
                 )}
@@ -160,19 +161,22 @@ export function WeekView({
       <div className="flex items-center gap-3">
         <h2
           className="text-2xl font-bold"
-          style={{ color: 'var(--color-emerald-deep)', fontFamily: 'var(--font-display), serif' }}
+          style={{
+            color: 'var(--brand-green-dark)',
+            /* Finding 7: fontFamily removed — body already sets Inter globally via layout.tsx */
+          }}
         >
           {getDayName(currentDay.day_date, 'long')}
         </h2>
-        <span className="text-sm" style={{ color: 'var(--color-clay-muted)' }}>
+        <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
           {formatDate(currentDay.day_date, 'long')}
         </span>
         {isToday(currentDay.day_date) && (
           <span
             className="px-2 py-0.5 rounded-full text-xs font-semibold"
             style={{
-              background: 'rgba(212, 148, 10, 0.12)',
-              color: 'var(--color-amber)',
+              background: 'var(--brand-amber-subtle)',
+              color: 'var(--brand-amber)',
             }}
           >
             Today

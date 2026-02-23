@@ -1,12 +1,24 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, RefreshCw, Clock, Loader2, Pencil, AlertTriangle, X, Copy, Repeat2, Users } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronUp,
+  RefreshCw,
+  Clock,
+  Loader2,
+  Pencil,
+  AlertTriangle,
+  X,
+  Copy,
+  Repeat2,
+  Users,
+} from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { formatMacros, capitalize, getDayName } from '@/lib/utils';
-import type { Meal, DailyPlan, MemberNutritionTargets, KidProfile } from '@/types';
+import type { Meal, DailyPlan, MemberNutritionTargets, KidProfile, MemberServing } from '@/types';
 
 interface MealCardProps {
   meal: Meal;
@@ -26,11 +38,6 @@ interface MealCardProps {
 }
 
 /**
- * Card displaying a single meal with expandable recipe details.
- * Shows nutrition info, cooking time, and swap functionality.
- * Loads recipe on demand when user clicks "Recipe".
- */
-/**
  * Scale a portion_size string by a ratio, adjusting all numeric quantities and gram weights.
  * e.g. "2 cups chickpeas (500g) + 4 bhature (400g total)" with ratio 0.56
  *    → "~1 cups chickpeas (~280g) + ~2 bhature (~224g total)"
@@ -38,24 +45,44 @@ interface MealCardProps {
 function scalePortionString(portionSize: string, ratio: number): string {
   const parts = portionSize.split(/\s*\+\s*/);
 
-  return parts.map((part) => {
-    // Scale the leading quantity number (e.g., "2 cups" → "~1 cups")
-    let scaled = part.replace(/^(\d+\.?\d*)/, (_, num) => {
-      const val = parseFloat(num) * ratio;
-      return '~' + (val < 1 ? val.toFixed(1) : String(Math.round(val * 10) / 10).replace(/\.0$/, ''));
-    });
+  return parts
+    .map((part) => {
+      // Scale the leading quantity number (e.g., "2 cups" → "~1 cups")
+      let scaled = part.replace(/^(\d+\.?\d*)/, (_, num) => {
+        const val = parseFloat(num) * ratio;
+        return (
+          '~' +
+          (val < 1 ? val.toFixed(1) : String(Math.round(val * 10) / 10).replace(/\.0$/, ''))
+        );
+      });
 
-    // Scale gram values in parentheses (e.g., "(500g)" → "(~280g)")
-    scaled = scaled.replace(/\((\d+\.?\d*)\s*g([^)]*)\)/, (_, num, rest) => {
-      const val = Math.round(parseFloat(num) * ratio);
-      return `(~${val}g${rest})`;
-    });
+      // Scale gram values in parentheses (e.g., "(500g)" → "(~280g)")
+      scaled = scaled.replace(/\((\d+\.?\d*)\s*g([^)]*)\)/, (_, num, rest) => {
+        const val = Math.round(parseFloat(num) * ratio);
+        return `(~${val}g${rest})`;
+      });
 
-    return scaled;
-  }).join(' + ');
+      return scaled;
+    })
+    .join(' + ');
 }
 
-export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMeal, onShareWithKids, swapping = false, customReplacing = false, copyingMeal = false, sharingMeal = false, kidProfiles, memberNutritionTargets, allDays, isRepeat = false }: MealCardProps) {
+export function MealCard({
+  meal,
+  onSwap,
+  onCustomReplace,
+  onRecipeLoad,
+  onCopyMeal,
+  onShareWithKids,
+  swapping = false,
+  customReplacing = false,
+  copyingMeal = false,
+  sharingMeal = false,
+  kidProfiles,
+  memberNutritionTargets,
+  allDays,
+  isRepeat = false,
+}: MealCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [loadingRecipe, setLoadingRecipe] = useState(false);
   const [editMode, setEditMode] = useState(false);
@@ -69,7 +96,11 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
   const isBusy = swapping || customReplacing || copyingMeal || sharingMeal;
 
   const hasKidShares = meal.shared_with_kids && meal.shared_with_kids.length > 0;
-  const showShareButton = kidProfiles && kidProfiles.length > 0 && onShareWithKids;
+
+  // Joint profiles manage the full household — kid-sharing is disabled for them
+  const isJointProfileContext = memberNutritionTargets && memberNutritionTargets.length > 0;
+  const showShareButton =
+    kidProfiles && kidProfiles.length > 0 && onShareWithKids && !isJointProfileContext;
 
   const handleCustomSubmit = async () => {
     if (customDescription.trim().length < 3) return;
@@ -139,9 +170,10 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
                 <span
                   className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wider"
                   style={{
-                    background: 'rgba(139, 92, 246, 0.10)',
-                    color: 'rgb(139, 92, 246)',
-                    border: '1px solid rgba(139, 92, 246, 0.20)',
+                    /* Finding 4: replaced rgba(139,92,246,...) with design tokens */
+                    background: 'var(--color-purple-subtle)',
+                    color: 'var(--color-purple)',
+                    border: '1px solid var(--color-purple-muted)',
                   }}
                 >
                   <Repeat2 className="h-3 w-3" />
@@ -151,7 +183,12 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
             </div>
             <h3
               className="font-semibold text-base leading-snug"
-              style={{ color: 'var(--color-emerald-deep)', fontFamily: 'var(--font-display), serif' }}
+              style={{
+                // --brand-green-light (#2AAF65) has ~5.3:1 contrast on dark backgrounds,
+                // meeting WCAG AA. --brand-green-dark (#146B3A) only reaches ~2.4:1.
+                color: 'var(--brand-green-light)',
+                // Finding 7: fontFamily removed — body already sets Inter via layout.tsx
+              }}
             >
               {meal.dish_name}
             </h3>
@@ -163,9 +200,10 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
                     key={kid.profile_id}
                     className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-semibold"
                     style={{
-                      background: 'rgba(99, 102, 241, 0.10)',
-                      color: 'rgb(99, 102, 241)',
-                      border: '1px solid rgba(99, 102, 241, 0.20)',
+                      /* Finding 4: replaced rgba(99,102,241,...) with design tokens */
+                      background: 'var(--color-indigo-subtle)',
+                      color: 'var(--color-indigo)',
+                      border: '1px solid var(--color-indigo-muted)',
                     }}
                   >
                     {kid.profile_name}
@@ -174,12 +212,17 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
                 <span
                   className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-bold"
                   style={{
-                    background: 'rgba(16, 185, 129, 0.10)',
-                    color: 'rgb(16, 185, 129)',
-                    border: '1px solid rgba(16, 185, 129, 0.20)',
+                    /* Finding 4: replaced rgba(16,185,129,...) with design tokens */
+                    background: 'var(--color-emerald-subtle)',
+                    color: 'var(--color-emerald)',
+                    border: '1px solid var(--color-emerald-subtle)',
                   }}
                 >
-                  Cook &times;{(1 + meal.shared_with_kids!.reduce((sum, k) => sum + k.scale_ratio, 0)).toFixed(2)}
+                  Cook &times;
+                  {(
+                    1 +
+                    meal.shared_with_kids!.reduce((sum, k) => sum + k.scale_ratio, 0)
+                  ).toFixed(2)}
                 </span>
               </div>
             )}
@@ -190,96 +233,143 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
         <div
           className="rounded-xl p-3"
           style={{
-            background: 'rgba(45, 90, 63, 0.04)',
-            border: '1px solid rgba(45, 90, 63, 0.06)',
+            background: 'var(--brand-green-subtle)',
+            border: '1px solid var(--brand-green-subtle)',
           }}
         >
           {/* Total line — labeled as "Total" for joint profiles */}
           <div className="flex items-center justify-between text-sm">
             <div>
               {memberNutritionTargets && memberNutritionTargets.length > 0 && (
-                <span className="text-[10px] font-semibold uppercase tracking-wider mr-1.5" style={{ color: 'var(--color-sage)' }}>
+                <span
+                  className="text-[10px] font-semibold uppercase tracking-wider mr-1.5"
+                  style={{ color: 'var(--brand-green-light)' }}
+                >
                   Total
                 </span>
               )}
-              <span style={{ color: 'var(--color-clay-muted)' }}>Calories: </span>
-              <span className="font-bold" style={{ color: 'var(--color-clay)' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Calories: </span>
+              <span className="font-bold" style={{ color: 'var(--text-secondary)' }}>
                 {Math.round(meal.calories)}
               </span>
             </div>
-            <div className="flex items-center gap-1" style={{ color: 'var(--color-clay-muted)' }}>
+            <div className="flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
               <Clock className="h-3.5 w-3.5" />
               <span className="text-sm">{meal.prep_time} min</span>
             </div>
           </div>
-          <div className="mt-1.5 flex items-center justify-between text-xs" style={{ color: 'var(--color-clay-muted)' }}>
+          <div
+            className="mt-1.5 flex items-center justify-between text-xs"
+            style={{ color: 'var(--text-muted)' }}
+          >
             <span>{formatMacros(meal.protein, meal.carbs, meal.fats)}</span>
             {meal.portion_size && (
               <span>
-                {memberNutritionTargets && memberNutritionTargets.length > 0 ? 'Total portion' : 'Serving'}:{' '}
-                <span className="font-medium" style={{ color: 'var(--color-clay-light)' }}>
+                {memberNutritionTargets && memberNutritionTargets.length > 0
+                  ? 'Total portion'
+                  : 'Serving'}
+                :{' '}
+                <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>
                   {hasKidShares
-                    ? scalePortionString(meal.portion_size!, 1 + meal.shared_with_kids!.reduce((sum, k) => sum + k.scale_ratio, 0))
+                    ? scalePortionString(
+                        meal.portion_size!,
+                        1 +
+                          meal.shared_with_kids!.reduce((sum, k) => sum + k.scale_ratio, 0),
+                      )
                     : meal.portion_size}
                 </span>
               </span>
             )}
           </div>
 
-          {/* Per-person breakdown for joint profiles */}
-          {memberNutritionTargets && memberNutritionTargets.length > 0 && meal.portion_size && (
+          {/* Per-person breakdown — new member_servings format or legacy fallback */}
+          {meal.member_servings && meal.member_servings.length > 0 ? (
+            <MemberServingsDisplay servings={meal.member_servings} />
+          ) : memberNutritionTargets &&
+            memberNutritionTargets.length > 0 &&
+            meal.portion_size ? (
+            /* Legacy: share_ratio based display — kept for backward compat with old joint plans */
             <div
               className="mt-2.5 pt-2.5 space-y-1.5"
-              style={{ borderTop: '1px dashed rgba(45, 90, 63, 0.10)' }}
+              style={{ borderTop: '1px dashed var(--brand-green-border)' }}
             >
-              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-sage)' }}>
-                Per Person Serving
+              <p
+                className="text-[10px] font-semibold uppercase tracking-wider"
+                style={{ color: 'var(--brand-green-light)' }}
+              >
+                Per Person Serving (estimated)
               </p>
-              {memberNutritionTargets.map((member) => (
-                <div
-                  key={member.profile_id}
-                  className="rounded-lg px-2.5 py-1.5"
-                  style={{
-                    background: member.is_primary ? 'rgba(212, 148, 10, 0.04)' : 'rgba(45, 90, 63, 0.02)',
-                  }}
-                >
-                  <div className="flex items-baseline gap-1.5 text-xs">
-                    <span className="font-semibold shrink-0" style={{ color: 'var(--color-emerald-deep)' }}>
-                      {member.profile_name}:
-                    </span>
-                    <span className="font-medium" style={{ color: 'var(--color-clay-light)' }}>
-                      {scalePortionString(meal.portion_size!, member.share_ratio)}
-                    </span>
-                  </div>
-                </div>
-              ))}
+              {(() => {
+                const totalHouseholdCalories = memberNutritionTargets.reduce(
+                  (sum, m) => sum + m.target_calories,
+                  0,
+                );
+                return memberNutritionTargets.map((member) => {
+                  const shareRatio =
+                    totalHouseholdCalories > 0
+                      ? member.target_calories / totalHouseholdCalories
+                      : 1 / memberNutritionTargets.length;
+                  return (
+                    <div
+                      key={member.profile_id}
+                      className="rounded-lg px-2.5 py-1.5"
+                      style={{ background: 'var(--brand-green-subtle)' }}
+                    >
+                      <div className="flex items-baseline gap-1.5 text-xs">
+                        <span
+                          className="font-semibold shrink-0"
+                          style={{ color: 'var(--brand-green-light)' }}
+                        >
+                          {member.profile_name}:
+                        </span>
+                        <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>
+                          {scalePortionString(meal.portion_size!, shareRatio)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* Expandable Details */}
         {isExpanded && (
-          <div className="space-y-3 pt-3 animate-slide-down" style={{ borderTop: '1px solid var(--surface-glass-border)' }}>
+          <div
+            className="space-y-3 pt-3 animate-slide-down"
+            style={{ borderTop: '1px solid var(--surface-border)' }}
+          >
             {meal.description && (
               <div>
-                <h4 className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--color-sage)' }}>
+                <h4
+                  className="text-xs font-semibold uppercase tracking-wider mb-1"
+                  style={{ color: 'var(--brand-green-light)' }}
+                >
                   Description
                 </h4>
-                <p className="text-sm" style={{ color: 'var(--color-clay-light)' }}>{meal.description}</p>
+                <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                  {meal.description}
+                </p>
               </div>
             )}
 
             {meal.ingredients && meal.ingredients.length > 0 && (
               <div>
-                <h4 className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--color-sage)' }}>
+                <h4
+                  className="text-xs font-semibold uppercase tracking-wider mb-1.5"
+                  style={{ color: 'var(--brand-green-light)' }}
+                >
                   Ingredients ({meal.ingredients.length})
                 </h4>
-                <ul className="text-sm space-y-1" style={{ color: 'var(--color-clay-light)' }}>
+                <ul className="text-sm space-y-1" style={{ color: 'var(--text-secondary)' }}>
                   {meal.ingredients.map((ing, idx) => (
                     <li key={idx} className="flex gap-1">
-                      <span style={{ color: 'var(--color-clay-muted)' }}>&bull;</span>
+                      <span style={{ color: 'var(--text-muted)' }}>&bull;</span>
                       <span>
-                        <span className="font-medium">{ing.quantity} {ing.unit}</span>{' '}
+                        <span className="font-medium">
+                          {ing.quantity} {ing.unit}
+                        </span>{' '}
                         {ing.name}
                       </span>
                     </li>
@@ -290,15 +380,17 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
 
             {meal.recipe_brief && (
               <div>
-                <h4 className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--color-sage)' }}>
+                <h4
+                  className="text-xs font-semibold uppercase tracking-wider mb-1"
+                  style={{ color: 'var(--brand-green-light)' }}
+                >
                   Recipe
                 </h4>
-                <p className="text-sm whitespace-pre-line" style={{ color: 'var(--color-clay-light)' }}>
+                <p className="text-sm whitespace-pre-line" style={{ color: 'var(--text-secondary)' }}>
                   {meal.recipe_brief}
                 </p>
               </div>
             )}
-
           </div>
         )}
 
@@ -307,11 +399,14 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
           <div
             className="rounded-xl p-3 space-y-2"
             style={{
-              background: 'rgba(45, 90, 63, 0.03)',
-              border: '1px solid rgba(45, 90, 63, 0.10)',
+              background: 'var(--brand-green-subtle)',
+              border: '1px solid var(--brand-green-border)',
             }}
           >
-            <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--color-sage)' }}>
+            <label
+              className="text-xs font-semibold uppercase tracking-wider"
+              style={{ color: 'var(--brand-green-light)' }}
+            >
               Describe your meal
             </label>
             <textarea
@@ -319,11 +414,11 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
               onChange={(e) => setCustomDescription(e.target.value)}
               placeholder="e.g., chicken biryani with raita"
               rows={2}
-              className="w-full rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2"
+              className="w-full rounded-xl px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[var(--brand-green)]"
               style={{
-                background: 'var(--surface-primary-solid)',
-                border: '1px solid var(--surface-glass-border)',
-                color: 'var(--color-clay)',
+                background: 'var(--bg-secondary)',
+                border: '1px solid var(--surface-border)',
+                color: 'var(--text-secondary)',
               }}
               disabled={customReplacing}
               maxLength={500}
@@ -363,18 +458,28 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
           <div
             className="rounded-xl p-3 flex gap-2"
             style={{
-              background: 'rgba(212, 148, 10, 0.08)',
-              border: '1px solid rgba(212, 148, 10, 0.20)',
+              background: 'var(--brand-amber-subtle)',
+              border: '1px solid var(--brand-amber-glow)',
             }}
           >
-            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-amber)' }} />
+            <AlertTriangle
+              className="h-4 w-4 shrink-0 mt-0.5"
+              style={{ color: 'var(--brand-amber)' }}
+            />
             <div className="flex-1">
               {dietaryWarnings.map((w, i) => (
-                <p key={i} className="text-xs" style={{ color: 'var(--color-amber)' }}>{w}</p>
+                <p key={i} className="text-xs" style={{ color: 'var(--brand-amber)' }}>
+                  {w}
+                </p>
               ))}
             </div>
-            <button onClick={() => setDietaryWarnings(null)} className="shrink-0 self-start">
-              <X className="h-3.5 w-3.5" style={{ color: 'var(--color-amber)' }} />
+            {/* Finding 8: focus-visible outline so keyboard users can dismiss warnings */}
+            <button
+              onClick={() => setDietaryWarnings(null)}
+              className="shrink-0 self-start rounded focus-visible:outline-2 focus-visible:outline-[var(--brand-green)] focus-visible:outline-offset-2"
+              aria-label="Dismiss dietary warning"
+            >
+              <X className="h-3.5 w-3.5" style={{ color: 'var(--brand-amber)' }} />
             </button>
           </div>
         )}
@@ -384,19 +489,25 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
           <div
             className="rounded-xl p-3 space-y-2"
             style={{
-              background: 'rgba(45, 90, 63, 0.03)',
-              border: '1px solid rgba(45, 90, 63, 0.10)',
+              background: 'var(--brand-green-subtle)',
+              border: '1px solid var(--brand-green-border)',
             }}
           >
             <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--color-sage)' }}>
+              <label
+                className="text-xs font-semibold uppercase tracking-wider"
+                style={{ color: 'var(--brand-green-light)' }}
+              >
                 Copy to
               </label>
               <button
-                onClick={() => { setCopyMode(false); setSelectedDayId(null); }}
+                onClick={() => {
+                  setCopyMode(false);
+                  setSelectedDayId(null);
+                }}
                 className="p-0.5 rounded hover:bg-black/5"
               >
-                <X className="h-3.5 w-3.5" style={{ color: 'var(--color-clay-muted)' }} />
+                <X className="h-3.5 w-3.5" style={{ color: 'var(--text-muted)' }} />
               </button>
             </div>
 
@@ -406,17 +517,15 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
                 <button
                   key={day.id}
                   onClick={() => setSelectedDayId(day.id === selectedDayId ? null : day.id)}
-                  className="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors"
+                  className="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-[var(--brand-green)] focus-visible:outline-offset-2"
                   style={{
-                    background: selectedDayId === day.id
-                      ? 'var(--color-emerald)'
-                      : 'var(--surface-primary-solid)',
-                    color: selectedDayId === day.id
-                      ? '#fff'
-                      : 'var(--color-clay)',
-                    border: selectedDayId === day.id
-                      ? '1px solid var(--color-emerald)'
-                      : '1px solid var(--surface-glass-border)',
+                    background: selectedDayId === day.id ? 'var(--brand-green)' : 'var(--bg-secondary)',
+                    /* Finding 5: #fff → 'white' for consistency with Button component */
+                    color: selectedDayId === day.id ? 'white' : 'var(--text-secondary)',
+                    border:
+                      selectedDayId === day.id
+                        ? '1px solid var(--brand-green)'
+                        : '1px solid var(--surface-border)',
                   }}
                 >
                   {getDayName(day.day_date, 'short')}
@@ -425,47 +534,52 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
             </div>
 
             {/* Meal slot list for selected day */}
-            {selectedDayId && (() => {
-              const targetDay = allDays.find((d) => d.id === selectedDayId);
-              if (!targetDay) return null;
-              const targetMeals = targetDay.meals.filter((m) => m.id !== meal.id);
-              if (targetMeals.length === 0) {
+            {selectedDayId &&
+              (() => {
+                const targetDay = allDays.find((d) => d.id === selectedDayId);
+                if (!targetDay) return null;
+                const targetMeals = targetDay.meals.filter((m) => m.id !== meal.id);
+                if (targetMeals.length === 0) {
+                  return (
+                    <p className="text-xs py-1" style={{ color: 'var(--text-muted)' }}>
+                      No other meal slots on this day.
+                    </p>
+                  );
+                }
                 return (
-                  <p className="text-xs py-1" style={{ color: 'var(--color-clay-muted)' }}>
-                    No other meal slots on this day.
-                  </p>
+                  <div className="space-y-1">
+                    {targetMeals.map((target) => (
+                      <button
+                        key={target.id}
+                        onClick={async () => {
+                          if (onCopyMeal) {
+                            await onCopyMeal(meal.id, target.id);
+                            setCopyMode(false);
+                            setSelectedDayId(null);
+                          }
+                        }}
+                        disabled={copyingMeal}
+                        /* Finding 8: focus-visible outline for keyboard navigability of meal slots */
+                        className="w-full text-left rounded-lg px-3 py-2 text-sm transition-colors hover:brightness-95 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-[var(--brand-green)] focus-visible:outline-offset-2"
+                        style={{
+                          background: 'var(--bg-secondary)',
+                          border: '1px solid var(--surface-border)',
+                          color: 'var(--text-secondary)',
+                        }}
+                      >
+                        <span
+                          className="font-medium"
+                          style={{ color: 'var(--brand-green-light)' }}
+                        >
+                          {capitalize(target.meal_type)}
+                        </span>
+                        <span style={{ color: 'var(--text-muted)' }}> — </span>
+                        <span>{target.dish_name}</span>
+                      </button>
+                    ))}
+                  </div>
                 );
-              }
-              return (
-                <div className="space-y-1">
-                  {targetMeals.map((target) => (
-                    <button
-                      key={target.id}
-                      onClick={async () => {
-                        if (onCopyMeal) {
-                          await onCopyMeal(meal.id, target.id);
-                          setCopyMode(false);
-                          setSelectedDayId(null);
-                        }
-                      }}
-                      disabled={copyingMeal}
-                      className="w-full text-left rounded-lg px-3 py-2 text-sm transition-colors hover:brightness-95 disabled:opacity-50"
-                      style={{
-                        background: 'var(--surface-primary-solid)',
-                        border: '1px solid var(--surface-glass-border)',
-                        color: 'var(--color-clay)',
-                      }}
-                    >
-                      <span className="font-medium" style={{ color: 'var(--color-emerald-deep)' }}>
-                        {capitalize(target.meal_type)}
-                      </span>
-                      <span style={{ color: 'var(--color-clay-muted)' }}> — </span>
-                      <span>{target.dish_name}</span>
-                    </button>
-                  ))}
-                </div>
-              );
-            })()}
+              })()}
           </div>
         )}
 
@@ -474,19 +588,25 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
           <div
             className="rounded-xl p-3 space-y-2"
             style={{
-              background: 'rgba(99, 102, 241, 0.03)',
-              border: '1px solid rgba(99, 102, 241, 0.12)',
+              /* Finding 4: replaced rgba(99,102,241,0.03/0.12) with design token equivalents.
+                 The share panel uses indigo at very low opacity — colour-mix gives an exact
+                 match without introducing new raw rgba() calls.                              */
+              background: 'color-mix(in srgb, var(--color-indigo-subtle) 20%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--color-indigo-subtle) 80%, transparent)',
             }}
           >
             <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--color-sage)' }}>
+              <label
+                className="text-xs font-semibold uppercase tracking-wider"
+                style={{ color: 'var(--brand-green-light)' }}
+              >
                 Share with kids
               </label>
               <button
                 onClick={() => setShareMode(false)}
                 className="p-0.5 rounded hover:bg-black/5"
               >
-                <X className="h-3.5 w-3.5" style={{ color: 'var(--color-clay-muted)' }} />
+                <X className="h-3.5 w-3.5" style={{ color: 'var(--text-muted)' }} />
               </button>
             </div>
 
@@ -505,7 +625,9 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
                 className="rounded"
                 disabled={sharingMeal}
               />
-              <span className="text-sm font-medium" style={{ color: 'var(--color-clay)' }}>All Kids</span>
+              <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+                All Kids
+              </span>
             </label>
 
             {/* Individual kid checkboxes */}
@@ -526,7 +648,9 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
                   className="rounded"
                   disabled={sharingMeal}
                 />
-                <span className="text-sm" style={{ color: 'var(--color-clay)' }}>{kid.name}</span>
+                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                  {kid.name}
+                </span>
               </label>
             ))}
 
@@ -578,7 +702,10 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => { setEditMode(!editMode); setDietaryWarnings(null); }}
+            onClick={() => {
+              setEditMode(!editMode);
+              setDietaryWarnings(null);
+            }}
             disabled={isBusy}
           >
             <Pencil className="h-4 w-4 mr-1" />
@@ -587,7 +714,10 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => { setCopyMode(!copyMode); setSelectedDayId(null); }}
+            onClick={() => {
+              setCopyMode(!copyMode);
+              setSelectedDayId(null);
+            }}
             disabled={isBusy || !onCopyMeal}
             loading={copyingMeal}
           >
@@ -600,7 +730,9 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
               size="sm"
               onClick={() => {
                 // Pre-select currently shared kids when opening panel
-                const current = new Set((meal.shared_with_kids || []).map((k) => k.profile_id));
+                const current = new Set(
+                  (meal.shared_with_kids || []).map((k) => k.profile_id),
+                );
                 setSelectedKidIds(current);
                 setShareMode(!shareMode);
               }}
@@ -612,7 +744,7 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
             </Button>
           )}
           <Button
-            variant="outline"
+            variant="secondary"
             size="sm"
             onClick={() => onSwap(meal.id)}
             loading={swapping}
@@ -627,12 +759,118 @@ export function MealCard({ meal, onSwap, onCustomReplace, onRecipeLoad, onCopyMe
   );
 }
 
+// ── MemberServingsDisplay sub-component ──────────────────────────────────────
+
+function MemberServingsDisplay({ servings }: { servings: MemberServing[] }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  return (
+    <div
+      className="mt-2.5 pt-2.5"
+      style={{ borderTop: '1px dashed var(--brand-green-border)' }}
+    >
+      {/* Header row — always visible, toggles expansion */}
+      <button
+        type="button"
+        onClick={() => setIsExpanded((prev) => !prev)}
+        // aria-expanded communicates disclosure state to screen readers (WCAG 4.1.2)
+        aria-expanded={isExpanded}
+        aria-label="Per-Person Servings"
+        className="flex items-center justify-between w-full mb-1.5"
+      >
+        <p
+          className="text-[10px] font-semibold uppercase tracking-wider"
+          style={{ color: 'var(--brand-green-light)' }}
+        >
+          Per-Person Servings
+        </p>
+        {isExpanded ? (
+          <ChevronUp className="h-3 w-3" style={{ color: 'var(--text-muted)' }} />
+        ) : (
+          <ChevronDown className="h-3 w-3" style={{ color: 'var(--text-muted)' }} />
+        )}
+      </button>
+
+      {/* Expanded member rows */}
+      {isExpanded && (
+        <div className="space-y-2 animate-slide-down">
+          {servings.map((serving) => (
+            <div
+              key={serving.member_profile_id ?? serving.member_name}
+              className="rounded-lg px-2.5 py-2"
+              style={{
+                background: 'var(--brand-green-subtle)',
+                border: '1px solid var(--brand-green-border)',
+              }}
+            >
+              {/* Member name + adjustment text */}
+              <div className="flex items-baseline gap-1.5 mb-1.5">
+                <span
+                  className="text-xs font-semibold shrink-0"
+                  style={{ color: 'var(--brand-green-light)' }}
+                >
+                  {serving.member_name}
+                </span>
+                {serving.adjustment && (
+                  <span className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
+                    — {serving.adjustment}
+                  </span>
+                )}
+              </div>
+
+              {/* Per-member macro row */}
+              <div
+                className="flex items-center gap-3 text-[10px]"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <span>
+                  <span className="font-bold" style={{ color: 'var(--brand-amber)' }}>
+                    {Math.round(serving.calories)}
+                  </span>{' '}
+                  kcal
+                </span>
+                <span>
+                  <span className="font-bold" style={{ color: 'var(--color-error)' }}>
+                    {Math.round(serving.protein)}g
+                  </span>{' '}
+                  protein
+                </span>
+                <span>
+                  <span className="font-bold" style={{ color: 'var(--brand-amber-light)' }}>
+                    {Math.round(serving.carbs)}g
+                  </span>{' '}
+                  carbs
+                </span>
+                <span>
+                  <span className="font-bold" style={{ color: 'var(--color-info)' }}>
+                    {Math.round(serving.fats)}g
+                  </span>{' '}
+                  fats
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Collapsed summary — total member count */}
+      {!isExpanded && (
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          {servings.length} {servings.length === 1 ? 'member' : 'members'} — click to expand
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── Utility functions ─────────────────────────────────────────────────────────
+
 function getMealTypeGradient(type: string): string {
   const gradients: Record<string, string> = {
-    breakfast: 'linear-gradient(90deg, var(--color-amber), var(--color-amber-warm))',
-    lunch: 'linear-gradient(90deg, var(--color-emerald), var(--color-emerald-light))',
-    dinner: 'linear-gradient(90deg, var(--color-emerald-deep), var(--color-emerald))',
-    snack: 'linear-gradient(90deg, var(--color-sage-light), var(--color-sage))',
+    breakfast: 'linear-gradient(90deg, var(--brand-amber), var(--brand-amber-light))',
+    lunch: 'linear-gradient(90deg, var(--brand-green), var(--brand-green-light))',
+    dinner: 'linear-gradient(90deg, var(--brand-green-dark), var(--brand-green))',
+    snack: 'linear-gradient(90deg, var(--text-muted), var(--brand-green-light))',
   };
   return gradients[type] || gradients.snack;
 }

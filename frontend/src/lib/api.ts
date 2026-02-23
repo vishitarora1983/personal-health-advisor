@@ -1,5 +1,10 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
+import { loginWithRedirect } from '@/lib/routes';
 import type {
+  AuthUser,
+  TokenResponse,
+  SignupData,
+  LoginData,
   UserProfile,
   ProfileFormData,
   ProfileListItem,
@@ -20,6 +25,7 @@ import type {
   SwapMealRequest,
   TrackingUpdateRequest,
   ApiError,
+  UserSettings,           // NEW — user-level application settings
 } from '@/types';
 
 /**
@@ -31,6 +37,11 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/a
 /**
  * Axios instance with default configuration.
  * All API calls should use this instance for consistent error handling and configuration.
+ *
+ * `withCredentials: true` is required so the browser includes the HttpOnly
+ * `fedright_token` cookie on every cross-origin request to the backend.
+ * Without this flag, the browser's cookie jar would silently omit the cookie
+ * and the server-side cookie auth would never be evaluated.
  */
 const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
@@ -38,16 +49,62 @@ const apiClient: AxiosInstance = axios.create({
     'Content-Type': 'application/json',
   },
   timeout: 180000, // 3 minutes timeout (AI generation can take 60-120s)
+  withCredentials: true, // send HttpOnly auth cookie with every request
+});
+
+/**
+ * Axios request interceptor: attach Bearer token from localStorage.
+ */
+apiClient.interceptors.request.use((config) => {
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('auth_token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
 });
 
 /**
  * Axios response interceptor for centralized error handling.
- * Transforms axios errors into a consistent format.
+ *
+ * On 401 Unauthorized:
+ * 1. Clears the stored auth token from localStorage.
+ * 2. Dispatches the 'auth:logout' event so the AuthContext React state is cleared
+ *    (which also fires a fire-and-forget POST /auth/logout to clear the HttpOnly cookie).
+ * 3. Redirects to /login, preserving the current path so the user returns after login.
+ *
+ * Note: we no longer manipulate document.cookie here. The fedright_token cookie is
+ * HttpOnly and therefore inaccessible to JavaScript; it is cleared by the backend
+ * /auth/logout endpoint that AuthContext calls on logout.
  */
 apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError<ApiError>) => {
-    // Only log unexpected errors in development (skip 404s — those are normal flow control)
+    if (error.response?.status === 401) {
+      // Skip the session-expiry logout for auth endpoints — a 401 from
+      // /auth/login or /auth/signup is an expected "bad credentials" error,
+      // not a "session expired" signal. The calling code handles these 401s
+      // directly (e.g. showing an inline error message on the login form).
+      const url = error.config?.url ?? '';
+      const isAuthEndpoint = url.includes('/auth/login') || url.includes('/auth/signup') || url.includes('/auth/google');
+
+      if (typeof window !== 'undefined' && !isAuthEndpoint) {
+        // Clear localStorage token
+        localStorage.removeItem('auth_token');
+        // Notify the React AuthContext to clear auth state and call backend logout
+        window.dispatchEvent(new Event('auth:logout'));
+        // Redirect to login preserving the intended path for post-login return.
+        // loginWithRedirect centralises the URL construction so /login is
+        // never hardcoded here.
+        const currentPath = window.location.pathname;
+        // Only redirect if not already on a public route to avoid redirect loops
+        if (currentPath.startsWith('/app')) {
+          window.location.href = loginWithRedirect(currentPath);
+        }
+      }
+    }
+
     if (process.env.NEXT_PUBLIC_DEBUG === 'true' && error.response?.status !== 404) {
       console.warn('API Error:', error.response?.status, error.response?.data || error.message);
     }
@@ -55,6 +112,30 @@ apiClient.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// ============================================================================
+// AUTH ENDPOINTS
+// ============================================================================
+
+export async function signup(data: SignupData): Promise<TokenResponse> {
+  const response = await apiClient.post<TokenResponse>('/auth/signup', data);
+  return response.data;
+}
+
+export async function login(data: LoginData): Promise<TokenResponse> {
+  const response = await apiClient.post<TokenResponse>('/auth/login', data);
+  return response.data;
+}
+
+export async function googleLogin(idToken: string): Promise<TokenResponse> {
+  const response = await apiClient.post<TokenResponse>('/auth/google', { id_token: idToken });
+  return response.data;
+}
+
+export async function getMe(): Promise<AuthUser> {
+  const response = await apiClient.get<AuthUser>('/auth/me');
+  return response.data;
+}
 
 // ============================================================================
 // PROFILE ENDPOINTS
@@ -108,10 +189,23 @@ export async function getNutritionTargets(profileId: number): Promise<NutritionT
 }
 
 /**
- * Create a joint profile combining multiple individual profiles.
+ * Create a joint (household) profile.
+ *
+ * The data object must include at least 2 member_profile_ids and explicit
+ * household-level preferences. primary_profile_id is no longer part of the
+ * request shape — see JointProfileCreate in types/index.ts.
+ *
+ * Returns the created joint UserProfile plus a members array where each entry
+ * contains the member's target_calories, weight_goal, and medical_goals
+ * (rather than is_primary from the old API).
  */
-export async function createJointProfile(data: JointProfileCreate): Promise<{ profile: UserProfile; members: JointProfileMember[] }> {
-  const response = await apiClient.post<{ profile: UserProfile; members: JointProfileMember[] }>('/profile/joint', data);
+export async function createJointProfile(
+  data: JointProfileCreate,
+): Promise<{ profile: UserProfile; members: JointProfileMember[] }> {
+  const response = await apiClient.post<{ profile: UserProfile; members: JointProfileMember[] }>(
+    '/profile/joint',
+    data,
+  );
   return response.data;
 }
 
@@ -124,7 +218,8 @@ export async function getJointMembers(profileId: number): Promise<JointProfileMe
 }
 
 /**
- * Get per-member nutrition targets with share ratios for a joint profile.
+ * Get per-member nutrition targets for a joint profile. Returns one entry per
+ * household member with weight_goal and medical_goals.
  */
 export async function getMemberNutritionTargets(profileId: number): Promise<MemberNutritionTargets[]> {
   const response = await apiClient.get<MemberNutritionTargets[]>(`/profile/${profileId}/member-nutrition-targets`);
@@ -157,6 +252,10 @@ export async function shareWithKids(mealId: number, kidProfileIds: number[]): Pr
 
 /**
  * Generate a new AI-powered weekly meal plan for a profile.
+ *
+ * LEGACY: This non-streaming version is kept for backward compatibility.
+ * New code should use the useSSEGeneration hook for streaming progress.
+ * This function blocks for 60–120s on joint/family profiles.
  */
 export async function generateMealPlan(profileId: number): Promise<WeeklyPlan> {
   const response = await apiClient.post<WeeklyPlan>(`/meal-plans/generate?profile_id=${profileId}`);
@@ -354,7 +453,35 @@ export function downloadBlob(blob: Blob, filename: string): void {
 // ============================================================================
 
 /**
+ * Get the current user's application settings.
+ *
+ * Returns a UserSettings object. Called once on app load (e.g., inside
+ * AuthContext or a top-level settings provider) and cached in React state.
+ */
+export async function getUserSettings(): Promise<UserSettings> {
+  const response = await apiClient.get<UserSettings>('/settings');
+  return response.data;
+}
+
+/**
+ * Update one or more application settings for the current user.
+ *
+ * Accepts a Partial<UserSettings> so callers can update a single field:
+ *   updateUserSettings({ family_meal_workflow: 'llm_only' })
+ *
+ * The backend uses model_dump(exclude_unset=True) so only provided fields
+ * are written to the database.
+ *
+ * Returns the complete updated UserSettings object.
+ */
+export async function updateUserSettings(settings: Partial<UserSettings>): Promise<UserSettings> {
+  const response = await apiClient.put<UserSettings>('/settings', settings);
+  return response.data;
+}
+
+/**
  * Reset all data in the database (profiles, plans, tracking, grocery).
+ * The user account and settings are preserved.
  */
 export async function resetAllData(): Promise<{ message: string }> {
   const response = await apiClient.delete<{ message: string }>('/settings/reset-all');

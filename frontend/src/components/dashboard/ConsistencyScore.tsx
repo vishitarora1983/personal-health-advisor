@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Card } from '@/components/ui/Card';
-import { getScoreColor } from '@/lib/utils';
+import { darkChartTheme } from '@/lib/chartTheme';
 
 interface ConsistencyScoreProps {
   score: number;
@@ -39,16 +39,31 @@ export function ConsistencyScore({ score, calorieTrend }: ConsistencyScoreProps)
     over: 'Over Target',
   };
 
-  const trendColors = {
-    on_track: 'text-green-600',
-    under: 'text-yellow-600',
-    over: 'text-red-600',
+  // Use design token colors for trend status
+  const trendHexColors = {
+    on_track: darkChartTheme.hexColors.primary,
+    under: darkChartTheme.hexColors.secondary,
+    over: darkChartTheme.hexColors.danger,
   };
+
+  const trendTextColors = {
+    on_track: 'text-[var(--color-success)]',
+    under: 'text-[var(--color-warning)]',
+    over: 'text-[var(--color-error)]',
+  };
+
+  // Score ring color: green if >=70, amber if >=40, red if below
+  const scoreColor = score >= 70
+    ? darkChartTheme.hexColors.primary
+    : score >= 40
+      ? darkChartTheme.hexColors.secondary
+      : darkChartTheme.hexColors.danger;
 
   return (
     <Card>
       <Card.Header>
-        <h3 className="text-lg font-semibold text-gray-900">Consistency Score</h3>
+        <h3 className="type-h4 text-[var(--text-primary)]">Consistency Score</h3>
+        <p className="text-[var(--text-secondary)] text-sm mt-0.5">Overall plan adherence metric</p>
       </Card.Header>
       <Card.Body>
         <div className="flex flex-col items-center">
@@ -61,7 +76,7 @@ export function ConsistencyScore({ score, calorieTrend }: ConsistencyScoreProps)
                 cy="80"
                 r={radius}
                 fill="none"
-                stroke="#e5e7eb"
+                stroke="rgba(255, 255, 255, 0.06)"
                 strokeWidth="12"
               />
               {/* Progress circle */}
@@ -70,7 +85,7 @@ export function ConsistencyScore({ score, calorieTrend }: ConsistencyScoreProps)
                 cy="80"
                 r={radius}
                 fill="none"
-                stroke="#3b82f6"
+                stroke={scoreColor}
                 strokeWidth="12"
                 strokeLinecap="round"
                 strokeDasharray={circumference}
@@ -82,20 +97,30 @@ export function ConsistencyScore({ score, calorieTrend }: ConsistencyScoreProps)
             {/* Score Text */}
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-center">
-                <div className={`text-3xl font-bold ${getScoreColor(score)}`}>
+                <div className="text-3xl font-bold text-[var(--text-primary)]">
                   {Math.round(score)}%
                 </div>
-                <div className="text-sm text-gray-600">Consistent</div>
+                <div className="type-overline text-[var(--text-muted)] mt-0.5">Consistent</div>
               </div>
             </div>
           </div>
 
           {/* Calorie Trend */}
           <div className="mt-6 text-center">
-            <p className="text-sm text-gray-600 mb-1">Calorie Trend</p>
-            <p className={`text-lg font-semibold ${trendColors[trendStatus]}`}>
+            <p className="text-sm text-[var(--text-muted)] mb-1">Calorie Trend</p>
+            <p className={`text-lg font-semibold ${trendTextColors[trendStatus]}`}>
               {trendLabels[trendStatus]}
             </p>
+            {/* Trend color indicator dot */}
+            <div className="flex items-center justify-center gap-2 mt-2">
+              <div
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: trendHexColors[trendStatus] }}
+              />
+              <span className="text-xs text-[var(--text-muted)]">
+                {avgTrend > 0 ? '+' : ''}{Math.round(avgTrend)}% avg deviation
+              </span>
+            </div>
           </div>
         </div>
       </Card.Body>

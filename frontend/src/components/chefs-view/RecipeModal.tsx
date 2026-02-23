@@ -83,15 +83,15 @@ export function RecipeModal({ isOpen, onClose, dish }: RecipeModalProps) {
             key={i}
             className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium"
             style={{
-              background: 'rgba(212, 148, 10, 0.08)',
-              color: 'var(--color-amber-warm)',
-              border: '1px solid rgba(212, 148, 10, 0.15)',
+              background: 'var(--brand-amber-subtle)',
+              color: 'var(--brand-amber-light)',
+              border: '1px solid var(--brand-amber-glow)',
             }}
           >
             <span
               className="flex items-center justify-center w-4 h-4 rounded text-[10px] font-bold"
               style={{
-                background: 'linear-gradient(135deg, var(--color-amber), var(--color-amber-warm))',
+                background: 'linear-gradient(135deg, var(--brand-amber), var(--brand-amber-light))',
                 color: 'white',
               }}
             >
@@ -107,9 +107,9 @@ export function RecipeModal({ isOpen, onClose, dish }: RecipeModalProps) {
         <div className="flex flex-col items-center py-10">
           <Loader2
             className="h-10 w-10 animate-spin mb-3"
-            style={{ color: 'var(--color-emerald)' }}
+            style={{ color: 'var(--brand-green)' }}
           />
-          <p className="text-sm" style={{ color: 'var(--color-clay-muted)' }}>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
             Generating recipe...
           </p>
         </div>
@@ -123,7 +123,7 @@ export function RecipeModal({ isOpen, onClose, dish }: RecipeModalProps) {
             <div>
               <h3
                 className="text-sm font-semibold uppercase tracking-wider mb-3"
-                style={{ color: 'var(--color-emerald)' }}
+                style={{ color: 'var(--brand-green)' }}
               >
                 Ingredients
               </h3>
@@ -131,7 +131,7 @@ export function RecipeModal({ isOpen, onClose, dish }: RecipeModalProps) {
                 className="rounded-xl p-4"
                 style={{
                   background: 'rgba(168, 197, 176, 0.06)',
-                  border: '1px solid var(--surface-glass-border)',
+                  border: '1px solid var(--surface-border)',
                 }}
               >
                 <ul className="space-y-1.5">
@@ -139,11 +139,11 @@ export function RecipeModal({ isOpen, onClose, dish }: RecipeModalProps) {
                     <li
                       key={i}
                       className="flex items-baseline gap-2 text-sm"
-                      style={{ color: 'var(--color-clay)' }}
+                      style={{ color: 'var(--text-secondary)' }}
                     >
                       <span
                         className="w-1.5 h-1.5 rounded-full shrink-0 mt-1.5"
-                        style={{ background: 'var(--color-amber)' }}
+                        style={{ background: 'var(--brand-amber)' }}
                       />
                       <span>
                         <span className="font-medium">{ing.quantity} {ing.unit}</span>{' '}
@@ -161,7 +161,7 @@ export function RecipeModal({ isOpen, onClose, dish }: RecipeModalProps) {
             <div>
               <h3
                 className="text-sm font-semibold uppercase tracking-wider mb-3"
-                style={{ color: 'var(--color-emerald)' }}
+                style={{ color: 'var(--brand-green)' }}
               >
                 Instructions
               </h3>
@@ -169,8 +169,8 @@ export function RecipeModal({ isOpen, onClose, dish }: RecipeModalProps) {
                 className="rounded-xl p-4 text-sm leading-relaxed whitespace-pre-line"
                 style={{
                   background: 'rgba(168, 197, 176, 0.06)',
-                  border: '1px solid var(--surface-glass-border)',
-                  color: 'var(--color-clay)',
+                  border: '1px solid var(--surface-border)',
+                  color: 'var(--text-secondary)',
                 }}
               >
                 {recipeMeal.recipe_brief}
@@ -180,8 +180,8 @@ export function RecipeModal({ isOpen, onClose, dish }: RecipeModalProps) {
 
           {/* Prep time */}
           {recipeMeal.prep_time > 0 && (
-            <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-clay-light)' }}>
-              <ChefHat className="h-4 w-4" style={{ color: 'var(--color-amber)' }} />
+            <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+              <ChefHat className="h-4 w-4" style={{ color: 'var(--brand-amber)' }} />
               <span>Prep time: {recipeMeal.prep_time} min</span>
             </div>
           )}
@@ -190,7 +190,7 @@ export function RecipeModal({ isOpen, onClose, dish }: RecipeModalProps) {
 
       {/* No recipe yet and not loading */}
       {!loading && !recipeMeal && (
-        <p className="text-sm text-center py-8" style={{ color: 'var(--color-clay-subtle)' }}>
+        <p className="text-sm text-center py-8" style={{ color: 'var(--text-muted)' }}>
           No recipe available for this dish.
         </p>
       )}

@@ -21,10 +21,10 @@ const MEAL_TYPE_LABELS: Record<MealType, string> = {
 };
 
 const MEAL_TYPE_COLORS: Record<MealType, string> = {
-  breakfast: 'var(--color-amber)',
-  lunch: 'var(--color-emerald)',
-  dinner: 'var(--color-teal-soft)',
-  snack: 'var(--color-clay-light)',
+  breakfast: 'var(--brand-amber)',
+  lunch: 'var(--brand-green)',
+  dinner: 'var(--color-info)',
+  snack: 'var(--text-secondary)',
 };
 
 function DishBlock({
@@ -45,8 +45,8 @@ function DishBlock({
         border: '1px solid rgba(168, 197, 176, 0.08)',
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = 'rgba(212, 148, 10, 0.06)';
-        e.currentTarget.style.borderColor = 'rgba(212, 148, 10, 0.15)';
+        e.currentTarget.style.background = 'var(--brand-amber-subtle)';
+        e.currentTarget.style.borderColor = 'var(--brand-amber-glow)';
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = 'rgba(168, 197, 176, 0.04)';
@@ -55,7 +55,7 @@ function DishBlock({
     >
       <p
         className="text-sm font-medium leading-tight mb-1"
-        style={{ color: 'var(--color-emerald-deep)' }}
+        style={{ color: 'var(--brand-green-dark)' }}
       >
         {dish.dishName}
       </p>
@@ -67,11 +67,11 @@ function DishBlock({
             <div key={i} className="flex items-baseline gap-1 text-xs">
               <span
                 className="font-medium shrink-0"
-                style={{ color: 'var(--color-teal-soft)' }}
+                style={{ color: 'var(--color-info)' }}
               >
                 {p.profileName}:
               </span>
-              <span style={{ color: 'var(--color-clay-light)' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>
                 {p.portion}
               </span>
             </div>
@@ -80,7 +80,7 @@ function DishBlock({
       ) : (
         <p
           className="text-xs mb-1"
-          style={{ color: 'var(--color-clay-light)' }}
+          style={{ color: 'var(--text-secondary)' }}
         >
           {dish.aggregatedPortion}
         </p>
@@ -89,14 +89,14 @@ function DishBlock({
       <div className="flex items-center gap-1.5 flex-wrap">
         <span
           className="text-xs font-medium"
-          style={{ color: 'var(--color-amber-warm)' }}
+          style={{ color: 'var(--brand-amber-light)' }}
         >
           {dish.totalCalories} kcal
         </span>
         {multiProfile && (
           <span
             className="inline-flex items-center gap-0.5 text-xs"
-            style={{ color: 'var(--color-teal-soft)' }}
+            style={{ color: 'var(--color-info)' }}
           >
             <Users className="h-3 w-3" />
             {dish.profileNames.length}
@@ -109,7 +109,7 @@ function DishBlock({
 
 function EmptyCell() {
   return (
-    <p className="text-xs px-2 py-3" style={{ color: 'var(--color-clay-subtle)' }}>
+    <p className="text-xs px-2 py-3" style={{ color: 'var(--text-muted)' }}>
       No meal
     </p>
   );
@@ -126,8 +126,8 @@ function DesktopGrid({ grid, dayHeaders, onDishClick, visibleMealTypes }: ChefsG
       className="hidden lg:grid overflow-hidden rounded-2xl"
       style={{
         gridTemplateColumns: '100px repeat(7, 1fr)',
-        border: '1px solid var(--surface-glass-border)',
-        background: 'var(--surface-primary)',
+        border: '1px solid var(--surface-border)',
+        background: 'var(--surface-glass)',
       }}
     >
       {/* Header row */}
@@ -135,8 +135,8 @@ function DesktopGrid({ grid, dayHeaders, onDishClick, visibleMealTypes }: ChefsG
         className="p-3"
         style={{
           background: 'rgba(26, 58, 42, 0.04)',
-          borderBottom: '1px solid var(--surface-glass-border)',
-          borderRight: '1px solid var(--surface-glass-border)',
+          borderBottom: '1px solid var(--surface-border)',
+          borderRight: '1px solid var(--surface-border)',
         }}
       />
       {dayHeaders.map((header, i) => (
@@ -144,10 +144,10 @@ function DesktopGrid({ grid, dayHeaders, onDishClick, visibleMealTypes }: ChefsG
           key={i}
           className="p-3 text-center text-xs font-semibold uppercase tracking-wider"
           style={{
-            color: 'var(--color-emerald)',
+            color: 'var(--brand-green)',
             background: 'rgba(26, 58, 42, 0.04)',
-            borderBottom: '1px solid var(--surface-glass-border)',
-            borderRight: i < DAY_COUNT - 1 ? '1px solid var(--surface-glass-border)' : 'none',
+            borderBottom: '1px solid var(--surface-border)',
+            borderRight: i < DAY_COUNT - 1 ? '1px solid var(--surface-border)' : 'none',
           }}
         >
           {header}
@@ -161,8 +161,8 @@ function DesktopGrid({ grid, dayHeaders, onDishClick, visibleMealTypes }: ChefsG
           <div
             className="p-3 flex items-start"
             style={{
-              borderBottom: rowIdx < mealTypes.length - 1 ? '1px solid var(--surface-glass-border)' : 'none',
-              borderRight: '1px solid var(--surface-glass-border)',
+              borderBottom: rowIdx < mealTypes.length - 1 ? '1px solid var(--surface-border)' : 'none',
+              borderRight: '1px solid var(--surface-border)',
             }}
           >
             <span
@@ -179,8 +179,8 @@ function DesktopGrid({ grid, dayHeaders, onDishClick, visibleMealTypes }: ChefsG
               key={dayIdx}
               className="p-2 min-h-[80px]"
               style={{
-                borderBottom: rowIdx < mealTypes.length - 1 ? '1px solid var(--surface-glass-border)' : 'none',
-                borderRight: dayIdx < DAY_COUNT - 1 ? '1px solid var(--surface-glass-border)' : 'none',
+                borderBottom: rowIdx < mealTypes.length - 1 ? '1px solid var(--surface-border)' : 'none',
+                borderRight: dayIdx < DAY_COUNT - 1 ? '1px solid var(--surface-border)' : 'none',
               }}
             >
               {cell.dishes.length === 0 ? (
@@ -214,8 +214,8 @@ function TabletGrid({ grid, dayHeaders, onDishClick, visibleMealTypes }: ChefsGr
     <div
       className="hidden md:block lg:hidden overflow-x-auto rounded-2xl"
       style={{
-        border: '1px solid var(--surface-glass-border)',
-        background: 'var(--surface-primary)',
+        border: '1px solid var(--surface-border)',
+        background: 'var(--surface-glass)',
       }}
     >
       <div
@@ -230,8 +230,8 @@ function TabletGrid({ grid, dayHeaders, onDishClick, visibleMealTypes }: ChefsGr
           className="p-2 sticky left-0 z-10"
           style={{
             background: 'rgba(26, 58, 42, 0.06)',
-            borderBottom: '1px solid var(--surface-glass-border)',
-            borderRight: '1px solid var(--surface-glass-border)',
+            borderBottom: '1px solid var(--surface-border)',
+            borderRight: '1px solid var(--surface-border)',
           }}
         />
         {dayHeaders.map((header, i) => (
@@ -239,10 +239,10 @@ function TabletGrid({ grid, dayHeaders, onDishClick, visibleMealTypes }: ChefsGr
             key={i}
             className="p-2 text-center text-xs font-semibold uppercase tracking-wider"
             style={{
-              color: 'var(--color-emerald)',
+              color: 'var(--brand-green)',
               background: 'rgba(26, 58, 42, 0.06)',
-              borderBottom: '1px solid var(--surface-glass-border)',
-              borderRight: i < DAY_COUNT - 1 ? '1px solid var(--surface-glass-border)' : 'none',
+              borderBottom: '1px solid var(--surface-border)',
+              borderRight: i < DAY_COUNT - 1 ? '1px solid var(--surface-border)' : 'none',
             }}
           >
             {header}
@@ -255,9 +255,9 @@ function TabletGrid({ grid, dayHeaders, onDishClick, visibleMealTypes }: ChefsGr
             <div
               className="p-2 flex items-start sticky left-0 z-10"
               style={{
-                background: 'var(--surface-primary)',
-                borderBottom: rowIdx < mealTypes.length - 1 ? '1px solid var(--surface-glass-border)' : 'none',
-                borderRight: '1px solid var(--surface-glass-border)',
+                background: 'var(--surface-glass)',
+                borderBottom: rowIdx < mealTypes.length - 1 ? '1px solid var(--surface-border)' : 'none',
+                borderRight: '1px solid var(--surface-border)',
               }}
             >
               <span
@@ -272,8 +272,8 @@ function TabletGrid({ grid, dayHeaders, onDishClick, visibleMealTypes }: ChefsGr
                 key={dayIdx}
                 className="p-2 min-h-[70px]"
                 style={{
-                  borderBottom: rowIdx < mealTypes.length - 1 ? '1px solid var(--surface-glass-border)' : 'none',
-                  borderRight: dayIdx < DAY_COUNT - 1 ? '1px solid var(--surface-glass-border)' : 'none',
+                  borderBottom: rowIdx < mealTypes.length - 1 ? '1px solid var(--surface-border)' : 'none',
+                  borderRight: dayIdx < DAY_COUNT - 1 ? '1px solid var(--surface-border)' : 'none',
                 }}
               >
                 {cell.dishes.length === 0 ? (
@@ -319,12 +319,12 @@ function MobileView({ grid, dayHeaders, onDishClick, visibleMealTypes }: ChefsGr
             )}
             style={{
               background: selectedDay === i
-                ? 'linear-gradient(135deg, var(--color-emerald), var(--color-emerald-deep))'
+                ? 'linear-gradient(135deg, var(--brand-green), var(--brand-green-dark))'
                 : 'rgba(168, 197, 176, 0.08)',
-              color: selectedDay === i ? 'white' : 'var(--color-clay-light)',
+              color: selectedDay === i ? 'white' : 'var(--text-secondary)',
               border: selectedDay === i
                 ? 'none'
-                : '1px solid var(--surface-glass-border)',
+                : '1px solid var(--surface-border)',
             }}
           >
             {header}
@@ -341,8 +341,8 @@ function MobileView({ grid, dayHeaders, onDishClick, visibleMealTypes }: ChefsGr
               key={mealType}
               className="rounded-xl p-4"
               style={{
-                background: 'var(--surface-primary)',
-                border: '1px solid var(--surface-glass-border)',
+                background: 'var(--surface-glass)',
+                border: '1px solid var(--surface-border)',
                 boxShadow: 'var(--shadow-sm)',
               }}
             >

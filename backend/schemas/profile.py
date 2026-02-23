@@ -21,6 +21,9 @@ class ProfileCreate(BaseModel):
     # Profile Name
     name: str = Field(min_length=1, max_length=100, description="Profile name")
 
+    # Member-Only Flag
+    is_member_only: bool = Field(default=False, description="True for profiles created inside the Joint Profile wizard")
+
     # Physical Characteristics
     age: int = Field(ge=1, le=120, description="Age in years")
     gender: str = Field(pattern="^(male|female|other)$", description="Biological gender")
@@ -140,6 +143,7 @@ class ProfileResponse(BaseModel):
     id: int
     name: str
     is_joint: bool = False
+    is_member_only: bool = False
     age: int
     gender: str
     height_cm: float
@@ -192,6 +196,7 @@ class ProfileListItem(BaseModel):
     id: int
     name: str
     is_joint: bool = False
+    is_member_only: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -216,17 +221,108 @@ class NutritionTargetsResponse(BaseModel):
 
 
 class JointProfileCreate(BaseModel):
-    """Schema for creating a joint profile from existing individual profiles."""
+    """
+    Schema for creating a joint profile with household-level preferences.
+
+    The caller selects which individual profiles to include and specifies the
+    household's shared cooking/dietary preferences directly. There is no concept
+    of a 'primary' profile — all members are equal contributors to the plan.
+
+    member_profile_ids must contain at least 2 IDs; each must belong to the
+    current user and must not itself be a joint profile.
+
+    Household preferences (diet_type, allergies, etc.) override or supplement
+    any individual member preferences when the AI generates a meal plan.
+    """
     name: str = Field(min_length=1, max_length=100)
-    primary_profile_id: int
-    member_profile_ids: List[int] = Field(min_length=1)
+    member_profile_ids: List[int] = Field(
+        min_length=2,
+        description="IDs of individual profiles to include (minimum 2, none can be joint profiles)"
+    )
+
+    # ---- Household-level dietary preferences --------------------------------
+    # These become the joint profile's own preference fields and are stored on
+    # the UserProfile row (same columns used by individual profiles).
+
+    diet_type: str = Field(
+        default="none",
+        pattern="^(none|vegetarian|vegan|keto|paleo|mediterranean|pescatarian)$",
+        description="Household dietary pattern"
+    )
+    allergies: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "Explicit allergy list for the household. "
+            "If omitted, the backend auto-merges (union) all members' allergies."
+        )
+    )
+    foods_to_avoid: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description=(
+            "Household-level foods to avoid. "
+            "If omitted, the backend concatenates each member's foods_to_avoid."
+        )
+    )
+    foods_to_include: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description=(
+            "Household-level foods to actively include. "
+            "If omitted, the backend concatenates each member's foods_to_include."
+        )
+    )
+    spice_tolerance: str = Field(
+        default="medium",
+        pattern="^(mild|medium|hot)$",
+        description="Household spice heat preference"
+    )
+    cooking_skill: str = Field(
+        default="intermediate",
+        pattern="^(beginner|intermediate|advanced)$",
+        description="Household cooking skill level"
+    )
+    max_cook_time: int = Field(
+        ge=10,
+        le=120,
+        default=45,
+        description="Maximum cooking time in minutes for the household"
+    )
+    cuisines: Optional[List[str]] = Field(
+        default=None,
+        description="Preferred cuisines for the household"
+    )
+    meals_per_day: List[str] = Field(
+        default=["breakfast", "lunch", "dinner"],
+        description="Which meal slots to plan for the household"
+    )
+    snacks_per_day: int = Field(
+        ge=0,
+        le=3,
+        default=1,
+        description="Number of snack slots per day for the household"
+    )
+    meals_to_repeat: int = Field(
+        default=4,
+        ge=0,
+        le=7,
+        description="Number of meals repeated across the week for simplicity"
+    )
 
 
 class JointProfileMemberResponse(BaseModel):
-    """A member within a joint profile."""
+    """
+    Summary of one member within a joint profile.
+
+    Exposes each member's individual nutrition goals so the frontend can display
+    them in the household overview panel without a separate API call.
+    is_primary is removed because the primary concept no longer exists.
+    """
     profile_id: int
     profile_name: str
-    is_primary: bool
+    target_calories: int
+    weight_goal: str            # 'lose' | 'maintain' | 'gain'
+    medical_goals: Optional[List[str]] = None
 
 
 class JointProfileResponse(BaseModel):
@@ -236,11 +332,24 @@ class JointProfileResponse(BaseModel):
 
 
 class MemberNutritionTargetsResponse(BaseModel):
-    """Per-member nutrition targets with share ratio for proportional serving breakdown."""
+    """
+    Full nutrition targets for one member of a joint profile.
+
+    Used by the household nutrition breakdown panel and by the meal generation
+    service to understand how many calories each member needs.
+
+    is_primary and share_ratio are removed:
+    - is_primary: the primary concept is gone.
+    - share_ratio: callers who need a ratio can compute it from target_calories
+      across the list; baking it into the response was fragile and redundant.
+
+    weight_goal and medical_goals are added so the UI can label each member's
+    context (e.g. "Alice — losing weight, heart health").
+    """
     profile_id: int
     profile_name: str
-    is_primary: bool
-    share_ratio: float
+    weight_goal: str                    # 'lose' | 'maintain' | 'gain'
+    medical_goals: Optional[List[str]] = None
     bmr: float
     tdee: float
     target_calories: int

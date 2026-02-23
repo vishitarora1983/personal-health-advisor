@@ -1,4 +1,32 @@
 // ============================================================================
+// AUTH TYPES
+// ============================================================================
+
+export interface AuthUser {
+  id: number;
+  email: string;
+  display_name: string;
+  has_password: boolean;
+  has_google: boolean;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  token_type: string;
+}
+
+export interface SignupData {
+  email: string;
+  password: string;
+  display_name: string;
+}
+
+export interface LoginData {
+  email: string;
+  password: string;
+}
+
+// ============================================================================
 // PROFILE TYPES
 // ============================================================================
 
@@ -10,6 +38,7 @@ export interface UserProfile {
   id: number;
   name: string;
   is_joint: boolean;
+  is_member_only: boolean;
   profile_type: 'adult' | 'kid' | 'family';
 
   // Basic demographic information
@@ -59,6 +88,7 @@ export interface UserProfile {
  */
 export interface ProfileFormData {
   name: string;
+  is_member_only?: boolean;
   age: number;
   gender: 'male' | 'female' | 'other';
   height_cm: number;
@@ -112,35 +142,78 @@ export interface ProfileListItem {
   id: number;
   name: string;
   is_joint: boolean;
+  is_member_only: boolean;
   created_at: string;
 }
 
 /**
  * Request data for creating a joint profile.
+ *
+ * primary_profile_id is removed. All preferences are now specified explicitly
+ * for the household rather than inherited from a single primary member.
+ *
+ * member_profile_ids must contain at least 2 IDs; duplicates are ignored by
+ * the backend.
+ *
+ * All preference fields mirror ProfileFormData. Optional fields (allergies,
+ * foods_to_avoid, foods_to_include, cuisines) may be omitted; the backend will
+ * auto-merge them from individual member profiles in that case.
  */
 export interface JointProfileCreate {
   name: string;
-  primary_profile_id: number;
   member_profile_ids: number[];
+
+  // Household-level dietary preferences
+  diet_type: 'none' | 'vegetarian' | 'vegan' | 'keto' | 'paleo' | 'mediterranean' | 'pescatarian';
+  allergies?: string[];
+  foods_to_avoid?: string;
+  foods_to_include?: string;
+  spice_tolerance: 'mild' | 'medium' | 'hot';
+  cooking_skill: 'beginner' | 'intermediate' | 'advanced';
+  max_cook_time: number;
+  cuisines?: string[];
+  meals_per_day: string[];
+  snacks_per_day: number;
+  meals_to_repeat: number;
 }
 
 /**
- * A member within a joint profile.
+ * Summary of one member within a joint profile.
+ *
+ * is_primary is removed — the primary-profile concept no longer exists and
+ * all members are equal contributors to the household plan.
+ *
+ * target_calories, weight_goal, and medical_goals are added so the household
+ * overview panel can display each member's individual goals without a
+ * separate API call.
  */
 export interface JointProfileMember {
   profile_id: number;
   profile_name: string;
-  is_primary: boolean;
+  target_calories: number;
+  weight_goal: 'lose' | 'maintain' | 'gain';
+  medical_goals: string[] | null;
 }
 
 /**
- * Per-member nutrition targets with share ratio for proportional serving breakdown.
+ * Full nutrition targets for one member of a joint profile.
+ *
+ * Returned by GET /profile/{id}/member-nutrition-targets as an array — one
+ * entry per household member.
+ *
+ * is_primary and share_ratio are removed:
+ *   - is_primary: the primary-profile concept is gone.
+ *   - share_ratio: callers who need a ratio can compute it as
+ *       member.target_calories / sum(all members' target_calories)
+ *
+ * weight_goal and medical_goals added for contextual display in the household
+ * nutrition breakdown panel (e.g., "Alice — 1,450 kcal · losing weight").
  */
 export interface MemberNutritionTargets extends NutritionTargets {
   profile_id: number;
   profile_name: string;
-  is_primary: boolean;
-  share_ratio: number;
+  weight_goal: 'lose' | 'maintain' | 'gain';
+  medical_goals: string[] | null;
 }
 
 /**
@@ -153,11 +226,81 @@ export interface KidShareInfo {
 }
 
 /**
+ * Per-member serving data for one meal in a family/joint plan.
+ *
+ * Populated by the hybrid generation workflow when the AI explicitly assigns
+ * different portions or adjustments to different household members.
+ *
+ * adjustment: Free-text modifications for this member relative to the base dish.
+ *   Example: "half rice, extra salad, add cucumber raita"
+ *   Null if this member eats the standard household portion.
+ *
+ * portion_description: Human-readable description of the actual portion.
+ *   Example: "1 katori rajma, 0.5 katori rice, 2 bowls salad"
+ *   Null if the AI did not generate a description.
+ *
+ * Calorie and macro fields reflect this member's individual portion, not the
+ * aggregate total for the meal.
+ */
+export interface MemberServing {
+  member_profile_id: number | null;
+  member_name: string;
+  adjustment: string | null;
+  portion_description: string | null;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fats: number;
+  fiber: number | null;
+}
+
+/**
  * Lightweight kid profile for the share panel.
  */
 export interface KidProfile {
   id: number;
   name: string;
+}
+
+/**
+ * User-level application settings persisted on the User account (not per-profile).
+ *
+ * family_meal_workflow controls how joint/family meal plans are generated:
+ *   'hybrid'   — Two-step process: LLM generates the household dish; a
+ *                deterministic second pass splits it into per-member portions
+ *                based on MemberNutritionTargets. Faster and more consistent.
+ *   'llm_only' — Single LLM call generates the full plan including per-member
+ *                portions. Slower but allows the AI more creative latitude.
+ *
+ * Fetched once on app load via GET /settings and cached in a React context or
+ * Zustand store. Updated via PUT /settings.
+ */
+export interface UserSettings {
+  family_meal_workflow: 'hybrid' | 'llm_only';
+}
+
+/**
+ * A single progress event emitted by the SSE meal generation endpoint.
+ *
+ * The frontend's useSSEGeneration hook parses these events and exposes them
+ * as a progress bar with step label.
+ *
+ * Backend emits events as:
+ *   data: {"step": "generating_meals", "stepIndex": 2, "totalSteps": 4, "message": "Generating meals for Day 1..."}
+ *
+ * step: machine-readable step identifier, one of:
+ *   "validating_profile" | "loading_members" | "generating_meals" |
+ *   "saving_plan" | "complete" | "error"
+ *
+ * stepIndex: 0-based index of the current step.
+ * totalSteps: total number of steps in the generation process.
+ * message: human-readable status message for display in the progress UI.
+ */
+export interface SSEProgressStep {
+  step: string;
+  stepIndex: number;
+  totalSteps: number;
+  message: string;
 }
 
 // ============================================================================
@@ -201,6 +344,9 @@ export interface Meal {
 
   // Kid sharing info (populated when meal is shared with kids)
   shared_with_kids?: KidShareInfo[] | null;
+
+  // Per-member portion breakdown for joint/family plans (null for individual profiles)
+  member_servings?: MemberServing[] | null;
 }
 
 /**

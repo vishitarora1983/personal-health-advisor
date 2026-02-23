@@ -13,8 +13,9 @@ interface EmptyStateProps {
 }
 
 /**
- * Empty state with botanical luxe design.
- * Emerald-tinted icon container with warm amber CTA.
+ * Empty state with FedRight dark design system.
+ * Green-tinted icon container on dark background.
+ * Primary CTA uses brand green button.
  */
 export function EmptyState({
   icon: Icon,
@@ -25,25 +26,23 @@ export function EmptyState({
 }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center justify-center py-16 px-4 text-center animate-fade-in">
+      {/* Icon container — green-subtle tint per the brand green palette */}
       <div
-        className="p-6 mb-5 rounded-2xl"
+        className="p-6 mb-5 rounded-[var(--radius-2xl)]"
         style={{
-          background: 'linear-gradient(135deg, rgba(45, 90, 63, 0.06), rgba(127, 168, 138, 0.04))',
-          border: '1px solid rgba(45, 90, 63, 0.08)',
+          background: 'var(--brand-green-subtle)',
+          border: '1px solid var(--brand-green-border)',
         }}
       >
-        <Icon className="h-12 w-12" style={{ color: 'var(--color-sage)' }} />
+        <Icon className="h-12 w-12" style={{ color: 'var(--brand-green-light)' }} />
       </div>
       <h3
         className="text-xl font-semibold mb-2"
-        style={{
-          fontFamily: 'var(--font-display), serif',
-          color: 'var(--color-emerald-deep)',
-        }}
+        style={{ color: 'var(--text-primary)' }}
       >
         {title}
       </h3>
-      <p className="mb-8 max-w-sm text-sm" style={{ color: 'var(--color-clay-muted)' }}>
+      <p className="mb-8 max-w-sm text-sm" style={{ color: 'var(--text-muted)' }}>
         {description}
       </p>
       {actionLabel && onAction && (

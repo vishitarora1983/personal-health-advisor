@@ -159,7 +159,7 @@ export function MealTrackingRow({ meal, onSave, saving = false }: MealTrackingRo
                 />
               </div>
               <Button
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 onClick={handleEstimate}
                 loading={estimating}
@@ -176,12 +176,12 @@ export function MealTrackingRow({ meal, onSave, saving = false }: MealTrackingRo
               <div
                 className="rounded-lg p-3 space-y-2"
                 style={{
-                  background: estimated ? 'rgba(45, 90, 63, 0.06)' : undefined,
-                  border: estimated ? '1px solid rgba(45, 90, 63, 0.12)' : undefined,
+                  background: estimated ? 'var(--brand-green-subtle)' : undefined,
+                  border: estimated ? '1px solid var(--brand-green-border)' : undefined,
                 }}
               >
                 {estimated && (
-                  <p className="text-xs font-medium" style={{ color: 'var(--color-emerald)' }}>
+                  <p className="text-xs font-medium" style={{ color: 'var(--brand-green)' }}>
                     AI Estimated — adjust if needed
                   </p>
                 )}

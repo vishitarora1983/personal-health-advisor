@@ -13,6 +13,7 @@ import {
 } from 'recharts';
 import { Card } from '@/components/ui/Card';
 import { getDayName } from '@/lib/utils';
+import { darkChartTheme, tooltipStyle, tooltipLabelStyle } from '@/lib/chartTheme';
 import type { DailyStats } from '@/types';
 
 interface CalorieChartProps {
@@ -32,37 +33,50 @@ export function CalorieChart({ data }: CalorieChartProps) {
   return (
     <Card>
       <Card.Header>
-        <h3 className="text-lg font-semibold text-gray-900">
+        <h3 className="type-h4 text-[var(--text-primary)]">
           Calories: Planned vs Actual
         </h3>
+        <p className="text-[var(--text-secondary)] text-sm mt-0.5">Daily calorie comparison</p>
       </Card.Header>
       <Card.Body>
         <ResponsiveContainer width="100%" height={300}>
           <LineChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey="name" stroke="#6b7280" />
-            <YAxis stroke="#6b7280" />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: '#fff',
-                border: '1px solid #e5e7eb',
-                borderRadius: '0.5rem',
-              }}
+            <CartesianGrid {...darkChartTheme.cartesianGrid} />
+            <XAxis
+              dataKey="name"
+              tick={darkChartTheme.axis.tick}
+              axisLine={darkChartTheme.axis.axisLine}
+              tickLine={darkChartTheme.axis.tickLine}
             />
-            <Legend />
+            <YAxis
+              tick={darkChartTheme.axis.tick}
+              axisLine={darkChartTheme.axis.axisLine}
+              tickLine={darkChartTheme.axis.tickLine}
+            />
+            <Tooltip
+              contentStyle={tooltipStyle}
+              labelStyle={tooltipLabelStyle}
+            />
+            <Legend
+              wrapperStyle={tooltipLabelStyle}
+            />
             <Line
               type="monotone"
               dataKey="planned"
-              stroke="#3b82f6"
+              stroke={darkChartTheme.hexColors.tertiary}
               strokeWidth={2}
               name="Planned"
+              dot={{ fill: darkChartTheme.hexColors.tertiary, r: 4, strokeWidth: 0 }}
+              activeDot={{ r: 6, fill: darkChartTheme.hexColors.tertiary }}
             />
             <Line
               type="monotone"
               dataKey="actual"
-              stroke="#10b981"
+              stroke={darkChartTheme.hexColors.primary}
               strokeWidth={2}
               name="Actual"
+              dot={{ fill: darkChartTheme.hexColors.primary, r: 4, strokeWidth: 0 }}
+              activeDot={{ r: 6, fill: darkChartTheme.hexColors.primaryLight }}
             />
           </LineChart>
         </ResponsiveContainer>

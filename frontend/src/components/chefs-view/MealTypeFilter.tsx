@@ -14,24 +14,24 @@ const MEAL_TYPE_LABELS: Record<MealType, string> = {
 
 const MEAL_TYPE_COLORS: Record<MealType, { active: string; bg: string; border: string }> = {
   breakfast: {
-    active: 'var(--color-amber)',
-    bg: 'rgba(212, 148, 10, 0.10)',
-    border: 'rgba(212, 148, 10, 0.25)',
+    active: 'var(--brand-amber)',
+    bg: 'var(--brand-amber-subtle)',
+    border: 'var(--brand-amber-glow)',
   },
   lunch: {
-    active: 'var(--color-emerald)',
-    bg: 'rgba(45, 90, 63, 0.10)',
-    border: 'rgba(45, 90, 63, 0.25)',
+    active: 'var(--brand-green)',
+    bg: 'var(--brand-green-border)',
+    border: 'var(--brand-green-glow)',
   },
   dinner: {
-    active: 'var(--color-teal-soft)',
+    active: 'var(--color-info)',
     bg: 'rgba(42, 138, 122, 0.10)',
     border: 'rgba(42, 138, 122, 0.25)',
   },
   snack: {
-    active: 'var(--color-clay-light)',
-    bg: 'rgba(74, 63, 53, 0.08)',
-    border: 'rgba(74, 63, 53, 0.20)',
+    active: 'var(--text-secondary)',
+    bg: 'var(--surface-glass-hover)',
+    border: 'var(--surface-border-hover)',
   },
 };
 
@@ -58,7 +58,7 @@ export function MealTypeFilter({ selectedTypes, onSelectionChange }: MealTypeFil
       <div className="flex items-center gap-2 flex-wrap">
         <span
           className="text-xs font-semibold uppercase tracking-wider mr-1"
-          style={{ color: 'var(--color-clay-subtle)' }}
+          style={{ color: 'var(--text-muted)' }}
         >
           Meals
         </span>
@@ -73,16 +73,16 @@ export function MealTypeFilter({ selectedTypes, onSelectionChange }: MealTypeFil
               onClick={() => toggle(type)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
               style={{
-                background: selected ? colors.bg : 'rgba(74, 63, 53, 0.04)',
-                border: `1px solid ${selected ? colors.border : 'rgba(74, 63, 53, 0.10)'}`,
-                color: selected ? colors.active : 'var(--color-clay-light)',
+                background: selected ? colors.bg : 'var(--surface-glass)',
+                border: `1px solid ${selected ? colors.border : 'var(--surface-border)'}`,
+                color: selected ? colors.active : 'var(--text-secondary)',
               }}
             >
               <div
                 className="flex items-center justify-center w-4 h-4 rounded transition-all shrink-0"
                 style={{
-                  background: selected ? colors.active : 'rgba(74, 63, 53, 0.08)',
-                  border: selected ? 'none' : '1px solid rgba(74, 63, 53, 0.15)',
+                  background: selected ? colors.active : 'var(--surface-glass-hover)',
+                  border: selected ? 'none' : '1px solid var(--surface-border)',
                 }}
               >
                 {selected && <Check className="h-2.5 w-2.5 text-white" />}

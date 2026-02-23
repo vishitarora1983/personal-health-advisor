@@ -14,7 +14,9 @@ interface ModalProps {
 }
 
 /**
- * Modal with botanical luxe glassmorphic backdrop and refined surface.
+ * Modal with FedRight dark glassmorphic backdrop and elevated surface.
+ * Uses --bg-tertiary for the modal body to create depth above the page.
+ * Entry animation uses scale-in with ease-out-back for springy feel.
  */
 export function Modal({
   isOpen,
@@ -58,13 +60,13 @@ export function Modal({
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
-      {/* Backdrop */}
+      {/* Backdrop — dark overlay with slight blur of page content */}
       <div
         className="fixed inset-0 transition-opacity animate-fade-in"
         style={{
-          backgroundColor: 'rgba(26, 58, 42, 0.35)',
-          backdropFilter: 'blur(6px) saturate(1.2)',
-          WebkitBackdropFilter: 'blur(6px) saturate(1.2)',
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          backdropFilter: 'blur(4px)',
+          WebkitBackdropFilter: 'blur(4px)',
         }}
         onClick={onClose}
         aria-hidden="true"
@@ -74,14 +76,12 @@ export function Modal({
       <div className="flex min-h-full items-center justify-center p-4">
         <div
           className={cn(
-            'relative w-full rounded-2xl animate-scale-in',
+            'relative w-full rounded-[var(--radius-xl)] animate-scale-in',
             sizeStyles[size]
           )}
           style={{
-            background: 'var(--surface-elevated)',
-            backdropFilter: 'blur(24px) saturate(1.8)',
-            WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
-            border: '1px solid var(--surface-glass-border)',
+            background: 'var(--bg-tertiary)',
+            border: '1px solid var(--surface-border)',
             boxShadow: 'var(--shadow-xl)',
           }}
           onClick={(e) => e.stopPropagation()}
@@ -90,14 +90,13 @@ export function Modal({
           {(title || showCloseButton) && (
             <div
               className="flex items-center justify-between px-6 py-5"
-              style={{ borderBottom: '1px solid var(--surface-glass-border)' }}
+              style={{ borderBottom: '1px solid var(--surface-border)' }}
             >
               {title && (
                 <h2
                   className="text-xl font-semibold"
                   style={{
-                    fontFamily: 'var(--font-display), serif',
-                    color: 'var(--color-emerald-deep)',
+                    color: 'var(--text-primary)',
                   }}
                 >
                   {title}
@@ -108,16 +107,16 @@ export function Modal({
                   onClick={onClose}
                   className="p-1.5 rounded-lg transition-all"
                   style={{
-                    color: 'var(--color-clay-subtle)',
+                    color: 'var(--text-muted)',
                     transitionDuration: 'var(--duration-fast)',
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = 'var(--color-sage-mist)';
-                    e.currentTarget.style.color = 'var(--color-emerald-deep)';
+                    e.currentTarget.style.backgroundColor = 'var(--surface-glass-hover)';
+                    e.currentTarget.style.color = 'var(--text-primary)';
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.backgroundColor = 'transparent';
-                    e.currentTarget.style.color = 'var(--color-clay-subtle)';
+                    e.currentTarget.style.color = 'var(--text-muted)';
                   }}
                   aria-label="Close modal"
                 >

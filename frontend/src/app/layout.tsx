@@ -1,26 +1,37 @@
+// frontend/src/app/layout.tsx
+//
+// ROOT LAYOUT — applies to ALL routes (public and authenticated)
+//
+// INTENTIONALLY MINIMAL: This layout contains only what every single route
+// in the app needs — the HTML document structure, the global font, and the
+// toast notification system. Authentication, sidebar, and profile state are
+// scoped to the nested app/layout.tsx which only wraps /app/* routes.
+//
+// Public routes (/, /login, /signup) render directly inside this layout
+// with no auth providers or sidebar — they are fully standalone pages.
+
 import type { Metadata } from "next";
-import { DM_Serif_Display, Source_Sans_3 } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
-import { Sidebar } from "@/components/layout/Sidebar";
 import { ToastProvider } from "@/components/ui/Toast";
-import { ProfileProvider } from "@/lib/ProfileContext";
 
-const displayFont = DM_Serif_Display({
+// Load Inter with all weights used by the type scale.
+// display: 'swap' prevents FOIT (flash of invisible text) while still downloading.
+// variable: '--font-inter' exposes Inter as a CSS custom property.
+const inter = Inter({
   subsets: ["latin"],
-  weight: "400",
-  variable: "--font-display",
-});
-
-const bodyFont = Source_Sans_3({
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
-  variable: "--font-body",
+  // Load all weights needed by the FedRight type scale
+  weight: ["400", "500", "600", "700", "800"],
+  // Expose as CSS custom property for use in globals.css and component styles
+  variable: "--font-inter",
+  // swap prevents FOIT (flash of invisible text) while still downloading
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "AI Meal Planner - Your Personal Health Advisor",
+  title: "FedRight — One Kitchen. Every Body. Perfectly Fed.",
   description:
-    "AI-powered meal planning with personalized nutrition tracking and grocery lists",
+    "AI-powered household meal planning for Indian families. Personalized nutrition, smart grocery lists, and family-aware meal planning.",
 };
 
 export default function RootLayout({
@@ -29,20 +40,22 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    // inter.variable exposes --font-inter CSS custom property to the entire document
+    <html lang="en" className={inter.variable}>
       <body
-        className={`${displayFont.variable} ${bodyFont.variable} antialiased`}
-        style={{ fontFamily: "var(--font-body), system-ui, sans-serif" }}
+        className="antialiased"
+        style={{
+          fontFamily:
+            "var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        }}
       >
+        {/*
+          ToastProvider is at root level because BOTH public pages (/login, /signup)
+          and authenticated pages (/app/*) need toast notifications.
+          For example: login errors, signup success messages.
+        */}
         <ToastProvider>
-          <ProfileProvider>
-            <Sidebar />
-            <main className="min-h-screen lg:ml-64">
-              <div className="mx-auto px-4 pt-16 pb-8 lg:px-8 lg:pt-8 max-w-7xl">
-                {children}
-              </div>
-            </main>
-          </ProfileProvider>
+          {children}
         </ToastProvider>
       </body>
     </html>

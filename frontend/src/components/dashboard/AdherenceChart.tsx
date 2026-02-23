@@ -1,8 +1,9 @@
 'use client';
 
 import React from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Card } from '@/components/ui/Card';
+import { darkChartTheme, tooltipStyle, tooltipLabelStyle } from '@/lib/chartTheme';
 import type { DashboardData } from '@/types';
 
 interface AdherenceChartProps {
@@ -14,15 +15,16 @@ interface AdherenceChartProps {
  */
 export function AdherenceChart({ adherence }: AdherenceChartProps) {
   const data = [
-    { name: 'Ate as Planned', value: adherence.ate_as_planned, color: '#10b981' },
-    { name: 'Ate Something Else', value: adherence.ate_something_else, color: '#f59e0b' },
-    { name: 'Skipped', value: adherence.skipped, color: '#ef4444' },
+    { name: 'Ate as Planned', value: adherence.ate_as_planned, color: darkChartTheme.hexColors.primary },
+    { name: 'Ate Something Else', value: adherence.ate_something_else, color: darkChartTheme.hexColors.secondary },
+    { name: 'Skipped', value: adherence.skipped, color: darkChartTheme.hexColors.danger },
   ];
 
   return (
     <Card>
       <Card.Header>
-        <h3 className="text-lg font-semibold text-gray-900">Meal Adherence</h3>
+        <h3 className="type-h4 text-[var(--text-primary)]">Meal Adherence</h3>
+        <p className="text-[var(--text-secondary)] text-sm mt-0.5">How closely you followed the plan</p>
       </Card.Header>
       <Card.Body>
         <ResponsiveContainer width="100%" height={300}>
@@ -32,24 +34,35 @@ export function AdherenceChart({ adherence }: AdherenceChartProps) {
               cx="50%"
               cy="50%"
               labelLine={false}
-              label={({ name, percent }) =>
-                `${name}: ${((percent || 0) * 100).toFixed(0)}%`
-              }
+              label={({ name, percent, x, y, midAngle }) => {
+                // Explicit fill is required for dark backgrounds — SVG text inherits nothing
+                // from CSS; without it the label renders as black and is invisible.
+                void midAngle; // referenced by Recharts internally
+                return (
+                  <text x={x} y={y} fill="#9BA3B0" textAnchor="middle" dominantBaseline="central" fontSize={11}>
+                    {`${name}: ${((percent || 0) * 100).toFixed(0)}%`}
+                  </text>
+                );
+              }}
               outerRadius={80}
-              fill="#8884d8"
               dataKey="value"
             >
               {data.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={entry.color} />
               ))}
             </Pie>
-            <Tooltip />
+            <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} />
+            <Legend wrapperStyle={tooltipLabelStyle} />
           </PieChart>
         </ResponsiveContainer>
         <div className="mt-4 text-center">
-          <p className="text-sm text-gray-600">
-            {adherence.ate_as_planned} of {adherence.total_meals} meals (
-            {Math.round(adherence.adherence_percentage)}%)
+          <p className="text-sm text-[var(--text-secondary)]">
+            <span className="text-[var(--brand-green-light)] font-semibold">{adherence.ate_as_planned}</span>
+            {' '}of{' '}
+            <span className="text-[var(--text-primary)] font-semibold">{adherence.total_meals}</span>
+            {' '}meals (
+            <span className="text-[var(--brand-green-light)] font-semibold">{Math.round(adherence.adherence_percentage)}%</span>
+            )
           </p>
         </div>
       </Card.Body>

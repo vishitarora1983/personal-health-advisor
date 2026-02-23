@@ -9,17 +9,32 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from database import get_db
+from models.user import User
+from models.profile import UserProfile
+from models.meal_plan import WeeklyPlan
 from schemas.dashboard import DashboardResponse
 from services.dashboard_service import get_dashboard_data
+from auth import get_current_user
 
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 
+def _verify_plan_ownership(db: Session, plan_id: int, user: User) -> WeeklyPlan:
+    plan = db.query(WeeklyPlan).filter(WeeklyPlan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Weekly plan with id {plan_id} not found")
+    profile = db.query(UserProfile).filter(UserProfile.id == plan.profile_id).first()
+    if not profile or profile.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Weekly plan with id {plan_id} not found")
+    return plan
+
+
 @router.get("/{plan_id}", response_model=DashboardResponse, status_code=status.HTTP_200_OK)
 def get_dashboard(
     plan_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Get comprehensive dashboard analytics for a weekly meal plan.
@@ -41,8 +56,9 @@ def get_dashboard(
     Raises:
         HTTPException 404: If weekly plan not found
     """
+    _verify_plan_ownership(db, plan_id, current_user)
+
     try:
-        # Get dashboard data using service
         dashboard_data = get_dashboard_data(db, plan_id)
 
         return DashboardResponse(**dashboard_data)

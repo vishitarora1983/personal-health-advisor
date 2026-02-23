@@ -43,7 +43,7 @@ export function SwapModal({ isOpen, onClose, onConfirm, loading = false }: SwapM
         />
 
         <div className="flex gap-3 justify-end pt-4">
-          <Button variant="outline" onClick={handleClose} disabled={loading}>
+          <Button variant="secondary" onClick={handleClose} disabled={loading}>
             Cancel
           </Button>
           <Button variant="primary" onClick={handleConfirm} loading={loading}>

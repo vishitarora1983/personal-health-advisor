@@ -1,0 +1,12 @@
+export { SmoothScroll, useSmoothScroll } from './SmoothScroll';
+export { Navbar } from './Navbar';
+export { Hero } from './Hero';
+export { ProblemStatement } from './ProblemStatement';
+export { HowItWorks } from './HowItWorks';
+export { FeatureShowcase } from './FeatureShowcase';
+export { CuisineMarquee } from './CuisineMarquee';
+export { AIDifference } from './AIDifference';
+export { AnimatedCounter } from './AnimatedCounter';
+export { Testimonials } from './Testimonials';
+export { FinalCTA } from './FinalCTA';
+export { Footer } from './Footer';

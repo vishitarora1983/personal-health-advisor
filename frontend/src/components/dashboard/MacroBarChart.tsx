@@ -12,6 +12,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { Card } from '@/components/ui/Card';
+import { darkChartTheme, tooltipStyle, tooltipLabelStyle } from '@/lib/chartTheme';
 import type { MacroBreakdown } from '@/types';
 
 interface MacroBarChartProps {
@@ -45,26 +46,43 @@ export function MacroBarChart({ planned, actual }: MacroBarChartProps) {
   return (
     <Card>
       <Card.Header>
-        <h3 className="text-lg font-semibold text-gray-900">
+        <h3 className="type-h4 text-[var(--text-primary)]">
           Macros: Planned vs Actual (%)
         </h3>
+        <p className="text-[var(--text-secondary)] text-sm mt-0.5">Macro nutrient breakdown</p>
       </Card.Header>
       <Card.Body>
         <ResponsiveContainer width="100%" height={300}>
           <BarChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey="name" stroke="#6b7280" />
-            <YAxis stroke="#6b7280" />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: '#fff',
-                border: '1px solid #e5e7eb',
-                borderRadius: '0.5rem',
-              }}
+            <CartesianGrid {...darkChartTheme.cartesianGrid} />
+            <XAxis
+              dataKey="name"
+              tick={darkChartTheme.axis.tick}
+              axisLine={darkChartTheme.axis.axisLine}
+              tickLine={darkChartTheme.axis.tickLine}
             />
-            <Legend />
-            <Bar dataKey="planned" fill="#3b82f6" name="Planned" />
-            <Bar dataKey="actual" fill="#10b981" name="Actual" />
+            <YAxis
+              tick={darkChartTheme.axis.tick}
+              axisLine={darkChartTheme.axis.axisLine}
+              tickLine={darkChartTheme.axis.tickLine}
+            />
+            <Tooltip
+              contentStyle={tooltipStyle}
+              labelStyle={tooltipLabelStyle}
+            />
+            <Legend wrapperStyle={tooltipLabelStyle} />
+            <Bar
+              dataKey="planned"
+              fill={darkChartTheme.hexColors.tertiary}
+              name="Planned"
+              radius={[4, 4, 0, 0]}
+            />
+            <Bar
+              dataKey="actual"
+              fill={darkChartTheme.hexColors.primary}
+              name="Actual"
+              radius={[4, 4, 0, 0]}
+            />
           </BarChart>
         </ResponsiveContainer>
       </Card.Body>

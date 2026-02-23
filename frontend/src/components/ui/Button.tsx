@@ -4,7 +4,9 @@ import React from 'react';
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'danger' | 'ghost';
+// 'outline' was removed — it duplicated 'secondary' and was not in the design spec.
+// 'icon' is added for transparent icon-button use cases (toolbar actions, close buttons, etc.).
+type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost' | 'icon';
 type ButtonSize = 'sm' | 'md' | 'lg';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -16,9 +18,9 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 /**
- * Button component with botanical luxe styling.
- * Primary uses a warm amber gradient with glow effects.
- * Secondary uses sage-tinted surfaces.
+ * Button component with FedRight dark design system.
+ * Primary uses brand green with glow on hover.
+ * Secondary/ghost use glass surfaces on dark backgrounds.
  */
 export function Button({
   variant = 'primary',
@@ -34,15 +36,16 @@ export function Button({
     'relative inline-flex items-center justify-center font-semibold rounded-xl transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none overflow-hidden';
 
   const variantStyles: Record<ButtonVariant, string> = {
-    primary: 'text-white focus-visible:ring-[var(--color-amber)]',
+    primary: 'text-[var(--text-inverse)] focus-visible:ring-[var(--brand-green)]',
     secondary:
-      'text-[var(--color-emerald-deep)] bg-[var(--color-sage-mist)] hover:bg-[var(--color-sage-light)] focus-visible:ring-[var(--color-sage)]',
-    outline:
-      'border-2 border-[var(--color-sage-light)] text-[var(--color-emerald-deep)] hover:bg-[var(--color-sage-mist)] hover:border-[var(--color-sage)] focus-visible:ring-[var(--color-sage)]',
+      'text-[var(--text-primary)] bg-[var(--surface-glass)] hover:bg-[var(--surface-glass-hover)] border border-[var(--surface-border)] focus-visible:ring-[var(--brand-green)]',
     danger:
-      'text-white focus-visible:ring-[var(--color-coral)]',
+      'text-white focus-visible:ring-[var(--color-error)]',
     ghost:
-      'text-[var(--color-clay)] hover:bg-[var(--color-sage-mist)] hover:text-[var(--color-emerald-deep)] focus-visible:ring-[var(--color-sage)]',
+      'text-[var(--text-secondary)] hover:bg-[var(--surface-glass-hover)] hover:text-[var(--text-primary)] focus-visible:ring-[var(--brand-green)]',
+    // icon: transparent background, muted text, subtle hover fill — for toolbar/close buttons
+    icon:
+      'bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] focus-visible:ring-[var(--brand-green)]',
   };
 
   const sizeStyles: Record<ButtonSize, string> = {
@@ -60,16 +63,16 @@ export function Button({
     if (variant === 'primary') {
       return {
         ...base,
-        background: 'linear-gradient(135deg, var(--color-amber) 0%, var(--color-amber-warm) 100%)',
-        boxShadow: '0 2px 8px rgba(212, 148, 10, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+        background: 'var(--brand-green)',
+        boxShadow: 'var(--shadow-md)',
       };
     }
 
     if (variant === 'danger') {
       return {
         ...base,
-        background: 'linear-gradient(135deg, var(--color-coral) 0%, var(--color-coral-light) 100%)',
-        boxShadow: '0 2px 8px rgba(212, 90, 58, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+        background: 'var(--color-error)',
+        boxShadow: 'var(--shadow-md)',
       };
     }
 
@@ -89,22 +92,24 @@ export function Button({
       disabled={disabled || loading}
       onMouseEnter={(e) => {
         if (variant === 'primary' && !disabled && !loading) {
-          e.currentTarget.style.boxShadow = 'var(--shadow-glow-amber)';
+          e.currentTarget.style.background = 'var(--brand-green-light)';
+          e.currentTarget.style.boxShadow = 'var(--shadow-glow-green)';
           e.currentTarget.style.transform = 'translateY(-1px)';
         }
         if (variant === 'danger' && !disabled && !loading) {
+          e.currentTarget.style.opacity = '0.9';
           e.currentTarget.style.transform = 'translateY(-1px)';
-          e.currentTarget.style.boxShadow = '0 4px 16px rgba(212, 90, 58, 0.35)';
         }
       }}
       onMouseLeave={(e) => {
         if (variant === 'primary' && !disabled && !loading) {
-          e.currentTarget.style.boxShadow = '0 2px 8px rgba(212, 148, 10, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15)';
+          e.currentTarget.style.background = 'var(--brand-green)';
+          e.currentTarget.style.boxShadow = 'var(--shadow-md)';
           e.currentTarget.style.transform = 'translateY(0)';
         }
         if (variant === 'danger' && !disabled && !loading) {
+          e.currentTarget.style.opacity = '1';
           e.currentTarget.style.transform = 'translateY(0)';
-          e.currentTarget.style.boxShadow = '0 2px 8px rgba(212, 90, 58, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15)';
         }
       }}
       {...props}

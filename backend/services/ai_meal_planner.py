@@ -15,6 +15,21 @@ from config import settings
 from prompts.meal_plan_system import SYSTEM_PROMPT, MEAL_PLAN_JSON_SCHEMA, build_user_prompt
 from prompts.swap_meal import SWAP_MEAL_JSON_SCHEMA, build_swap_prompt
 from prompts.custom_meal import CUSTOM_MEAL_JSON_SCHEMA, build_custom_meal_prompt
+from prompts.family_meal_plan import (
+    FAMILY_COMPONENTS_SYSTEM_PROMPT,
+    build_family_components_prompt,
+    SUPPLEMENT_PROMPT,
+    build_supplement_prompt,
+    ADJUSTMENT_DESCRIPTION_PROMPT,
+    build_adjustment_description_prompt,
+    FAMILY_DIRECT_SYSTEM_PROMPT,
+    build_family_direct_prompt,
+)
+from prompts.family_swap_meal import (
+    FAMILY_SWAP_COMPONENTS_SYSTEM_PROMPT,
+    FAMILY_SWAP_DIRECT_SYSTEM_PROMPT,
+    build_family_swap_prompt,
+)
 
 
 logging.basicConfig(level=logging.INFO)
@@ -619,3 +634,490 @@ Use USDA nutritional database standards. Be as accurate as possible based on typ
         except Exception as e:
             logger.error(f"Error analyzing custom meal: {e}")
             raise Exception(f"Failed to analyze custom meal: {str(e)}")
+
+    # =========================================================================
+    # Family / Joint-Profile Methods (Phase 3 — AI & Optimization Engine)
+    # =========================================================================
+
+    @staticmethod
+    def _extract_weekly_plan(data: Dict) -> list:
+        """
+        Extract the weekly_plan list from an LLM JSON response, tolerating key variants.
+
+        The LLM occasionally returns keys like "days", "meal_plan", or "week" instead
+        of the canonical "weekly_plan". This helper normalises all common variants and
+        falls back to a bare list response that is exactly 7 items long.
+
+        Args:
+            data: Parsed JSON dict (or list) from the LLM response.
+
+        Returns:
+            list: The array of day objects.
+
+        Raises:
+            ValueError: If no recognisable weekly plan structure can be found.
+        """
+        for key in ["weekly_plan", "days", "meal_plan", "week"]:
+            if key in data and isinstance(data[key], list):
+                return data[key]
+        # If the LLM returned a bare list of 7 days
+        if isinstance(data, list) and len(data) == 7:
+            return data
+        raise ValueError(
+            f"Cannot find weekly_plan in response keys: {list(data.keys()) if isinstance(data, dict) else type(data)}"
+        )
+
+    async def generate_family_components(
+        self,
+        profile,
+        member_targets: List[Dict],
+    ) -> Dict:
+        """
+        Generate a 7-day family meal plan with per-component nutritional breakdowns.
+
+        Called exclusively by the hybrid workflow path in the meal_plan router.
+        The LP solver (PortionOptimizer) will subsequently allocate component portions
+        to each member — this method is only responsible for producing the component
+        structure that the solver needs.
+
+        Args:
+            profile:        Joint UserProfile (is_joint == True).
+            member_targets: List of per-member target dicts as defined in Task 3.1.2.
+
+        Returns:
+            Dict with "weekly_plan" key containing 7 day dicts, each with "meals" array
+            where every meal has a "components" array.
+
+        Raises:
+            Exception: After self.max_retries failed attempts or JSON parse errors.
+        """
+        user_prompt = build_family_components_prompt(profile, member_targets)
+        logger.info(
+            f"[Family Components] Generating 7-day component plan for joint profile {profile.id}"
+        )
+
+        last_error = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                logger.info(
+                    f"[Family Components] Attempt {attempt}/{self.max_retries}"
+                )
+                response_text = await self._chat(
+                    system_content=FAMILY_COMPONENTS_SYSTEM_PROMPT,
+                    user_content=user_prompt,
+                    temperature=self.temperature,
+                    # Component data is verbose (7 days × meals × 2-5 components each)
+                    # but still significantly less than member_servings output.
+                    max_tokens=16000,
+                )
+                data = json.loads(response_text)
+
+                # Normalise key — LLM sometimes returns "days" or "meal_plan"
+                weekly_plan = self._extract_weekly_plan(data)
+
+                if len(weekly_plan) != 7:
+                    last_error = ValueError(
+                        f"Expected 7 days, got {len(weekly_plan)}"
+                    )
+                    continue
+
+                # Validate every meal has a non-empty components array with 2–5 items
+                for day in weekly_plan:
+                    for meal in day.get("meals", []):
+                        if not meal.get("components"):
+                            raise ValueError(
+                                f"Meal '{meal.get('dish_name')}' missing components array"
+                            )
+                        n_comp = len(meal["components"])
+                        if not (2 <= n_comp <= 5):
+                            raise ValueError(
+                                f"Meal '{meal.get('dish_name')}' has {n_comp} components "
+                                f"(must be 2–5)"
+                            )
+
+                logger.info(
+                    "[Family Components] Successfully generated 7-day component plan"
+                )
+                return {"weekly_plan": weekly_plan}
+
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.error(
+                    f"[Family Components] Attempt {attempt} failed: {e}"
+                )
+                last_error = e
+                continue
+
+        raise Exception(
+            f"Failed to generate family component plan after "
+            f"{self.max_retries} attempts: {last_error}"
+        )
+
+    async def suggest_supplements(
+        self,
+        components: List[Dict],
+        gap: Dict[str, str],
+        profile,
+    ) -> List[Dict]:
+        """
+        Ask the LLM for 2–3 supplement components to address an LP infeasibility gap.
+
+        Called when PortionOptimizer.allocate() returns feasible=False. The returned
+        components are appended to the meal's existing component list and the LP is
+        re-run. This gives the hybrid workflow a recovery mechanism for meals where
+        the initial component set cannot satisfy all member targets.
+
+        Args:
+            components: Existing component list for the meal (name, unit, cal_per_unit,
+                        protein_per_unit, carbs_per_unit, fats_per_unit, fiber_per_unit).
+            gap:        Dict from PortionResult.gap mapping member name to gap string.
+            profile:    Joint UserProfile (used for allergy/diet_type context).
+
+        Returns:
+            List of component dicts with the same schema as `components`. 2–3 items.
+
+        Raises:
+            Exception: On JSON parse failure or missing "supplements" key.
+        """
+        user_prompt = build_supplement_prompt(components, gap, profile)
+        logger.info(f"[Supplements] Requesting supplements for gap: {gap}")
+
+        response_text = await self._chat(
+            system_content=SUPPLEMENT_PROMPT,
+            user_content=user_prompt,
+            # Lower temperature for more precise, evidence-based nutritional output
+            temperature=0.5,
+            max_tokens=800,
+        )
+        data = json.loads(response_text)
+
+        supplements = data.get("supplements", [])
+        if not supplements:
+            logger.warning("[Supplements] LLM returned no supplements")
+            return []
+
+        logger.info(f"[Supplements] Received {len(supplements)} supplement(s)")
+        return supplements
+
+    async def describe_adjustments(
+        self,
+        meals_with_allocations: List[Dict],
+        member_targets: List[Dict],
+    ) -> Dict[str, Dict[str, str]]:
+        """
+        Convert LP numeric allocations to human-readable per-member adjustment text.
+
+        Called once per day after the LP has allocated portions for all meals in that
+        day. Batches all meals into a single LLM call to reduce API round-trips.
+        The returned text is stored in MealMemberServing.adjustment.
+
+        Args:
+            meals_with_allocations: List of meal dicts each containing:
+                meal_type, dish_name, components, and an "allocations" key
+                (nested dict: {member_name: {component_name: units}}).
+            member_targets: Per-member target dicts (for name and medical_goals context).
+
+        Returns:
+            Nested dict: {meal_key: {member_name: adjustment_text}}
+            Where meal_key = f"{meal_type}_{dish_name}".replace(" ", "_").lower()
+
+        Raises:
+            Exception: On JSON parse failure.
+        """
+        user_prompt = build_adjustment_description_prompt(
+            meals_with_allocations, member_targets
+        )
+        logger.info(
+            f"[Adjustments] Describing adjustments for "
+            f"{len(meals_with_allocations)} meal(s)"
+        )
+
+        response_text = await self._chat(
+            system_content=ADJUSTMENT_DESCRIPTION_PROMPT,
+            user_content=user_prompt,
+            temperature=0.6,
+            max_tokens=1500,
+        )
+        data = json.loads(response_text)
+        adjustments = data.get("adjustments", {})
+        logger.info(
+            f"[Adjustments] Received adjustments for {len(adjustments)} meal key(s)"
+        )
+        return adjustments
+
+    async def generate_family_meal_plan_direct(
+        self,
+        profile,
+        member_targets: List[Dict],
+        feedback: List[str] = None,
+    ) -> Dict:
+        """
+        Generate a 7-day family plan with per-member servings in one LLM call.
+
+        Called exclusively by the llm_only workflow path. Generates all 7 days
+        including member_servings for every meal in a single prompt. Token budget
+        is high (24 000) because each meal has N member_serving objects rather than
+        just component breakdowns.
+
+        When `feedback` is provided (from a failed FamilyPlanValidator run), the
+        prompt is rebuilt with a corrections section so the LLM can fix the
+        nutritional deviations that the validator flagged on the previous attempt.
+
+        Args:
+            profile:        Joint UserProfile (is_joint == True).
+            member_targets: Per-member target dicts.
+            feedback:       Optional list of validator warning strings from a previous
+                            attempt; passed to build_family_direct_prompt to include
+                            a corrections section in the prompt.
+
+        Returns:
+            Dict with "weekly_plan" key. Every meal within has a "member_servings" list
+            with exactly len(member_targets) entries.
+
+        Raises:
+            Exception: After self.max_retries failed attempts.
+        """
+        user_prompt = build_family_direct_prompt(
+            profile, member_targets, feedback=feedback
+        )
+        logger.info(
+            f"[Family Direct] Generating 7-day direct plan for joint profile {profile.id}"
+            + (" (with feedback)" if feedback else "")
+        )
+
+        last_error = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                logger.info(
+                    f"[Family Direct] Attempt {attempt}/{self.max_retries}"
+                )
+                response_text = await self._chat(
+                    system_content=FAMILY_DIRECT_SYSTEM_PROMPT,
+                    user_content=user_prompt,
+                    temperature=self.temperature,
+                    # member_servings roughly doubles output vs component plan because
+                    # each meal has N adjustment + nutrition objects instead of components.
+                    max_tokens=24000,
+                )
+                data = json.loads(response_text)
+                weekly_plan = self._extract_weekly_plan(data)
+
+                if len(weekly_plan) != 7:
+                    last_error = ValueError(
+                        f"Expected 7 days, got {len(weekly_plan)}"
+                    )
+                    continue
+
+                expected_member_count = len(member_targets)
+                member_names = {m["name"] for m in member_targets}
+
+                # Validate that every meal has the correct number of member_servings
+                # and that none of the household members are missing.
+                for day in weekly_plan:
+                    for meal in day.get("meals", []):
+                        servings = meal.get("member_servings", [])
+                        if len(servings) != expected_member_count:
+                            raise ValueError(
+                                f"Meal '{meal.get('dish_name')}' has {len(servings)} "
+                                f"member_servings, expected {expected_member_count}"
+                            )
+                        serving_names = {s["member_name"] for s in servings}
+                        missing = member_names - serving_names
+                        if missing:
+                            raise ValueError(
+                                f"Meal '{meal.get('dish_name')}' missing servings "
+                                f"for: {missing}"
+                            )
+
+                logger.info(
+                    "[Family Direct] Successfully generated 7-day direct plan"
+                )
+                return {"weekly_plan": weekly_plan}
+
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.error(
+                    f"[Family Direct] Attempt {attempt} failed: {e}"
+                )
+                last_error = e
+                continue
+
+        raise Exception(
+            f"Failed to generate family direct plan after "
+            f"{self.max_retries} attempts: {last_error}"
+        )
+
+    async def swap_family_meal(
+        self,
+        meal: Dict[str, Any],
+        day_meals: List[Dict],
+        profile,
+        member_targets: List[Dict],
+        workflow: str,
+        reason: Optional[str] = None,
+    ) -> Dict:
+        """
+        Swap a single meal in a family plan, branching on workflow type.
+
+        For hybrid:   returns a dict with "meal" key containing a "components" array.
+        For llm_only: returns a dict with "meal" key containing a "member_servings" array.
+
+        The router is responsible for running the LP solver (hybrid) or storing
+        member_servings directly (llm_only) after this method returns.
+
+        Args:
+            meal:           The meal being replaced (dict with meal_type, dish_name,
+                            calories, protein, carbs, fats, etc.).
+            day_meals:      All other meals for the same day (to avoid duplication).
+            profile:        Joint UserProfile ORM object.
+            member_targets: Per-member target dicts.
+            workflow:       "hybrid" or "llm_only".
+            reason:         Optional user-supplied reason for the swap.
+
+        Returns:
+            Dict with "meal" key. The meal object contains either "components"
+            (hybrid) or "member_servings" (llm_only) depending on the workflow.
+
+        Raises:
+            Exception: On JSON parse failure or missing required fields.
+        """
+        # Choose system prompt based on workflow
+        system_prompt = (
+            FAMILY_SWAP_COMPONENTS_SYSTEM_PROMPT
+            if workflow == "hybrid"
+            else FAMILY_SWAP_DIRECT_SYSTEM_PROMPT
+        )
+        user_prompt = build_family_swap_prompt(
+            meal, day_meals, profile, member_targets, workflow, reason
+        )
+
+        logger.info(
+            f"[Family Swap] Swapping '{meal.get('dish_name')}' "
+            f"(workflow={workflow}, reason={reason!r})"
+        )
+
+        response_text = await self._chat(
+            system_content=system_prompt,
+            user_content=user_prompt,
+            temperature=self.temperature,
+            # Single meal, but llm_only requires N member_serving objects — 4000 is
+            # sufficient for a single meal with up to ~6 household members.
+            max_tokens=4000,
+        )
+        data = json.loads(response_text)
+
+        # Accept top-level "meal" key or bare meal dict as the response
+        new_meal = data.get("meal", data)
+
+        # Validate based on workflow to catch LLM structural errors early
+        if workflow == "hybrid":
+            if not new_meal.get("components"):
+                raise ValueError(
+                    "Swap response missing 'components' array (hybrid workflow)"
+                )
+        else:
+            servings = new_meal.get("member_servings", [])
+            if len(servings) != len(member_targets):
+                raise ValueError(
+                    f"Swap returned {len(servings)} member_servings, "
+                    f"expected {len(member_targets)}"
+                )
+
+        logger.info(
+            f"[Family Swap] Successfully swapped to '{new_meal.get('dish_name')}'"
+        )
+        return {"meal": new_meal}
+
+    async def generate_family_single_day(
+        self,
+        profile,
+        member_targets: List[Dict],
+        workflow: str,
+        day_of_week: int,
+        existing_dishes: List[str] = None,
+    ) -> List[Dict]:
+        """
+        Generate meals for a single day in a family plan (used by regenerate_day).
+
+        Branches on workflow to use the appropriate system prompt. Returns the
+        "meals" list for one day, NOT the full weekly_plan structure.
+
+        Args:
+            profile:          Joint UserProfile ORM object.
+            member_targets:   Per-member target dicts.
+            workflow:         "hybrid" | "llm_only".
+            day_of_week:      0–6, included in the prompt as context.
+            existing_dishes:  Dish names already in the plan (to avoid duplicates).
+
+        Returns:
+            List of meal dicts for the requested day.
+            Each meal has either "components" (hybrid) or "member_servings" (llm_only).
+
+        Raises:
+            Exception: On JSON parse failure or empty meals array.
+        """
+        system_prompt = (
+            FAMILY_COMPONENTS_SYSTEM_PROMPT
+            if workflow == "hybrid"
+            else FAMILY_DIRECT_SYSTEM_PROMPT
+        )
+
+        # Build the weekly prompt as a base, then append a single-day instruction.
+        # This reuses all household context and member targets rather than
+        # duplicating the prompt logic, while keeping the response compact.
+        base_prompt = (
+            build_family_components_prompt(profile, member_targets)
+            if workflow == "hybrid"
+            else build_family_direct_prompt(profile, member_targets)
+        )
+
+        # Append dish-avoidance list if provided
+        avoid_text = ""
+        if existing_dishes:
+            avoid_text = (
+                f"\n\nDo NOT repeat any of these dishes already in the plan:\n"
+                + "\n".join(f"- {d}" for d in existing_dishes)
+            )
+
+        # Override the week-level instruction with a single-day instruction
+        single_day_instruction = (
+            f"\n\nIMPORTANT: Generate meals for ONE DAY ONLY "
+            f"(day_of_week={day_of_week}).\n"
+            f"Return JSON with a single 'meals' key (array of meal objects), "
+            f"NOT weekly_plan.\n"
+            f"{avoid_text}"
+        )
+
+        user_prompt = base_prompt + single_day_instruction
+
+        logger.info(
+            f"[Family Single Day] Generating day {day_of_week} for joint profile "
+            f"{profile.id} (workflow={workflow})"
+        )
+
+        response_text = await self._chat(
+            system_content=system_prompt,
+            user_content=user_prompt,
+            temperature=self.temperature,
+            # Single-day output is ~1/7th of a full week response
+            max_tokens=6000,
+        )
+        data = json.loads(response_text)
+
+        # Accept "meals" key directly or fall back to extracting from weekly_plan[0]
+        if "meals" in data and isinstance(data["meals"], list):
+            meals = data["meals"]
+        elif "weekly_plan" in data and data["weekly_plan"]:
+            meals = data["weekly_plan"][0].get("meals", [])
+        else:
+            raise ValueError(
+                f"Cannot extract meals from response keys: {list(data.keys())}"
+            )
+
+        if not meals:
+            raise ValueError(
+                "LLM returned an empty meals array for single-day generation"
+            )
+
+        logger.info(
+            f"[Family Single Day] Generated {len(meals)} meal(s) for day {day_of_week}"
+        )
+        return meals

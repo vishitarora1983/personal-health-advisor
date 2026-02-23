@@ -5,9 +5,11 @@ This module initializes the FastAPI application, configures CORS,
 sets up database tables, and registers all API routers.
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+from slowapi.errors import RateLimitExceeded
 
 from config import settings
 from database import engine, Base
@@ -21,6 +23,7 @@ from routers.grocery import router as grocery_router
 from routers.dashboard import router as dashboard_router
 from routers.export import router as export_router
 from routers.settings import router as settings_router
+from routers.auth import router as auth_router, limiter as auth_limiter
 
 
 @asynccontextmanager
@@ -74,6 +77,20 @@ async def lifespan(app: FastAPI):
             ))
         print("✓ Migrated user_profiles: added 'meals_to_repeat' column")
 
+    if "is_member_only" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE user_profiles ADD COLUMN is_member_only BOOLEAN DEFAULT 0 NOT NULL"
+            ))
+        print("✓ Migrated user_profiles: added 'is_member_only' column")
+
+    if "user_id" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE user_profiles ADD COLUMN user_id INTEGER REFERENCES users(id)"
+            ))
+        print("✓ Migrated user_profiles: added 'user_id' column")
+
     print("✓ Database tables created successfully")
     db_type = settings.DATABASE_URL.split("://")[0] if "://" in settings.DATABASE_URL else "sqlite"
     print(f"  Database type: {db_type}")
@@ -99,6 +116,26 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Register the slowapi limiter so its @limiter.limit decorators can find it.
+# slowapi looks for app.state.limiter at request time; without this the
+# decorators in routers/auth.py would silently have no effect.
+app.state.limiter = auth_limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    """
+    Return a structured 429 response instead of slowapi's default plain-text
+    response so the frontend can parse and display a meaningful error message.
+    """
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": f"Too many requests. {exc.detail}",
+            "retry_after": str(exc.retry_after) if hasattr(exc, "retry_after") else None,
+        },
+    )
+
 
 # Configure CORS middleware
 # Allows frontend to make cross-origin requests to the API
@@ -107,6 +144,7 @@ app.add_middleware(
     allow_origins=[
         settings.FRONTEND_URL,  # Production frontend URL
         "http://localhost:3000",  # Development frontend URL
+        "http://localhost:3001",  # Alternate dev port
         "http://127.0.0.1:3000",  # Alternative localhost
     ],
     allow_credentials=True,  # Allow cookies and authentication headers
@@ -168,6 +206,7 @@ app.include_router(grocery_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(export_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api/v1")
 
 
 if __name__ == "__main__":

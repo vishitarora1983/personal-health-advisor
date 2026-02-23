@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { RefreshCw, Flame, Drumstick, Wheat, Droplets, Crown } from 'lucide-react';
+import { RefreshCw, Flame, Drumstick, Wheat, Droplets } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { MealCard } from './MealCard';
@@ -53,6 +53,39 @@ export function DayColumn({
 }: DayColumnProps) {
   const hasMembers = memberNutritionTargets && memberNutritionTargets.length > 0;
 
+  // Check if any meal in this day has member_servings data (Phase 7+ plans)
+  const hasMemberServings = dailyPlan.meals.some(
+    (meal) => meal.member_servings && meal.member_servings.length > 0,
+  );
+
+  // Build per-member daily actuals from member_servings when available.
+  // Falls back to null (legacy ratio-based path) when no serving data is present.
+  const memberDailyActuals = hasMembers && hasMemberServings
+    ? memberNutritionTargets!.map((member) => {
+        const totals = { calories: 0, protein: 0, carbs: 0, fats: 0 };
+        dailyPlan.meals.forEach((meal) => {
+          const serving = meal.member_servings?.find(
+            (s) => s.member_profile_id === member.profile_id,
+          );
+          if (serving) {
+            totals.calories += serving.calories;
+            totals.protein += serving.protein;
+            totals.carbs += serving.carbs;
+            totals.fats += serving.fats;
+          }
+        });
+        return { member, actual: totals };
+      })
+    : null;
+
+  /**
+   * Compute per-member calorie share ratio from target_calories.
+   * Used only in the legacy (no member_servings) path.
+   */
+  const totalHouseholdCalories = hasMembers
+    ? memberNutritionTargets!.reduce((sum, m) => sum + m.target_calories, 0)
+    : 0;
+
   return (
     <div className="space-y-6">
       {/* Daily Nutrition Summary Bar */}
@@ -63,12 +96,12 @@ export function DayColumn({
             <div className="flex items-center justify-between">
               <p
                 className="text-xs font-semibold uppercase tracking-wider"
-                style={{ color: 'var(--color-sage)' }}
+                style={{ color: 'var(--brand-green-light)' }}
               >
                 Per-Person Daily Breakdown
               </p>
               <Button
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 onClick={() => onRegenerateDay(dayIndex)}
                 loading={regeneratingDay}
@@ -78,66 +111,91 @@ export function DayColumn({
               </Button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {memberNutritionTargets!.map((member) => (
-                <div
-                  key={member.profile_id}
-                  className="rounded-xl p-3"
-                  style={{
-                    background: member.is_primary
-                      ? 'rgba(212, 148, 10, 0.04)'
-                      : 'rgba(45, 90, 63, 0.03)',
-                    border: member.is_primary
-                      ? '1px solid rgba(212, 148, 10, 0.12)'
-                      : '1px solid rgba(45, 90, 63, 0.06)',
-                  }}
-                >
-                  <div className="flex items-center gap-2 mb-2">
-                    {member.is_primary && (
-                      <Crown className="h-3.5 w-3.5" style={{ color: 'var(--color-amber)' }} />
-                    )}
-                    <span
-                      className="text-sm font-semibold"
-                      style={{ color: 'var(--color-emerald-deep)' }}
-                    >
-                      {member.profile_name}
-                    </span>
+              {memberNutritionTargets!.map((member) => {
+                // Use actual serving data if available, otherwise ratio-based estimate
+                const actual = memberDailyActuals?.find(
+                  (d) => d.member.profile_id === member.profile_id,
+                )?.actual;
+
+                const shareRatio =
+                  !actual && totalHouseholdCalories > 0
+                    ? member.target_calories / totalHouseholdCalories
+                    : 1 / memberNutritionTargets!.length;
+
+                const calories = actual
+                  ? Math.round(actual.calories)
+                  : Math.round(dailyPlan.total_calories * shareRatio);
+                const protein = actual
+                  ? Math.round(actual.protein)
+                  : Math.round(dailyPlan.total_protein * shareRatio);
+                const carbs = actual
+                  ? Math.round(actual.carbs)
+                  : Math.round(dailyPlan.total_carbs * shareRatio);
+                const fats = actual
+                  ? Math.round(actual.fats)
+                  : Math.round(dailyPlan.total_fats * shareRatio);
+
+                return (
+                  <div
+                    key={member.profile_id}
+                    className="rounded-xl p-3"
+                    style={{
+                      // All members equal — no amber/primary distinction
+                      background: 'var(--brand-green-subtle)',
+                      border: '1px solid var(--brand-green-subtle)',
+                    }}
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <span
+                        className="text-sm font-semibold"
+                        style={{ color: 'var(--brand-green-light)' }}
+                      >
+                        {member.profile_name}
+                      </span>
+                      {/* Show "estimated" label if using ratio-based calculation */}
+                      {!actual && (
+                        <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                          (estimated)
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-x-5 gap-y-2">
+                      <NutritionStat
+                        icon={<Flame className="h-3.5 w-3.5" />}
+                        label="Calories"
+                        value={calories}
+                        target={member.target_calories}
+                        unit="kcal"
+                        color="var(--brand-amber)"
+                      />
+                      <NutritionStat
+                        icon={<Drumstick className="h-3.5 w-3.5" />}
+                        label="Protein"
+                        value={protein}
+                        target={member.target_protein}
+                        unit="g"
+                        color="var(--color-error)"
+                      />
+                      <NutritionStat
+                        icon={<Wheat className="h-3.5 w-3.5" />}
+                        label="Carbs"
+                        value={carbs}
+                        target={member.target_carbs}
+                        unit="g"
+                        color="var(--brand-amber-light)"
+                      />
+                      <NutritionStat
+                        icon={<Droplets className="h-3.5 w-3.5" />}
+                        label="Fats"
+                        value={fats}
+                        target={member.target_fats}
+                        unit="g"
+                        color="var(--color-info)"
+                      />
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-x-5 gap-y-2">
-                    <NutritionStat
-                      icon={<Flame className="h-3.5 w-3.5" />}
-                      label="Calories"
-                      value={Math.round(dailyPlan.total_calories * member.share_ratio)}
-                      target={member.target_calories}
-                      unit="kcal"
-                      color="var(--color-amber)"
-                    />
-                    <NutritionStat
-                      icon={<Drumstick className="h-3.5 w-3.5" />}
-                      label="Protein"
-                      value={Math.round(dailyPlan.total_protein * member.share_ratio)}
-                      target={member.target_protein}
-                      unit="g"
-                      color="var(--color-coral)"
-                    />
-                    <NutritionStat
-                      icon={<Wheat className="h-3.5 w-3.5" />}
-                      label="Carbs"
-                      value={Math.round(dailyPlan.total_carbs * member.share_ratio)}
-                      target={member.target_carbs}
-                      unit="g"
-                      color="var(--color-amber-warm)"
-                    />
-                    <NutritionStat
-                      icon={<Droplets className="h-3.5 w-3.5" />}
-                      label="Fats"
-                      value={Math.round(dailyPlan.total_fats * member.share_ratio)}
-                      target={member.target_fats}
-                      unit="g"
-                      color="var(--color-teal-soft)"
-                    />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </Card>
@@ -152,7 +210,7 @@ export function DayColumn({
                 value={Math.round(dailyPlan.total_calories)}
                 target={nutritionTargets?.target_calories}
                 unit="kcal"
-                color="var(--color-amber)"
+                color="var(--brand-amber)"
               />
               <NutritionStat
                 icon={<Drumstick className="h-4 w-4" />}
@@ -160,7 +218,7 @@ export function DayColumn({
                 value={Math.round(dailyPlan.total_protein)}
                 target={nutritionTargets?.target_protein}
                 unit="g"
-                color="var(--color-coral)"
+                color="var(--color-error)"
               />
               <NutritionStat
                 icon={<Wheat className="h-4 w-4" />}
@@ -168,7 +226,7 @@ export function DayColumn({
                 value={Math.round(dailyPlan.total_carbs)}
                 target={nutritionTargets?.target_carbs}
                 unit="g"
-                color="var(--color-amber-warm)"
+                color="var(--brand-amber-light)"
               />
               <NutritionStat
                 icon={<Droplets className="h-4 w-4" />}
@@ -176,12 +234,12 @@ export function DayColumn({
                 value={Math.round(dailyPlan.total_fats)}
                 target={nutritionTargets?.target_fats}
                 unit="g"
-                color="var(--color-teal-soft)"
+                color="var(--color-info)"
               />
             </div>
 
             <Button
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={() => onRegenerateDay(dayIndex)}
               loading={regeneratingDay}
@@ -219,6 +277,8 @@ export function DayColumn({
   );
 }
 
+// ── NutritionStat sub-component ───────────────────────────────────────────────
+
 function NutritionStat({
   icon,
   label,
@@ -234,9 +294,10 @@ function NutritionStat({
   unit: string;
   color: string;
 }) {
-  // Determine if value is within ±5% of target
-  const isOnTarget = target ? Math.abs(value - target) / target <= 0.05 : true;
-  const isOver = target ? value > target * 1.05 : false;
+  // Three-tier deviation coloring: ≤5% green, 5-15% amber, >15% red
+  const deviation = target ? Math.abs(value - target) / target : 0;
+  const isOnTarget = deviation <= 0.05;
+  const isSlightlyOff = deviation > 0.05 && deviation <= 0.15;
 
   return (
     <div className="flex items-center gap-2">
@@ -247,12 +308,12 @@ function NutritionStat({
         {icon}
       </div>
       <div>
-        <p className="text-xs" style={{ color: 'var(--color-clay-muted)' }}>
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
           {label}
         </p>
-        <p className="text-sm font-bold" style={{ color: 'var(--color-clay)' }}>
+        <p className="text-sm font-bold" style={{ color: 'var(--text-secondary)' }}>
           {value}
-          <span className="font-normal text-xs ml-0.5" style={{ color: 'var(--color-clay-muted)' }}>
+          <span className="font-normal text-xs ml-0.5" style={{ color: 'var(--text-muted)' }}>
             {unit}
           </span>
         </p>
@@ -261,10 +322,10 @@ function NutritionStat({
             className="text-[10px] font-medium"
             style={{
               color: isOnTarget
-                ? 'var(--color-emerald)'
-                : isOver
-                  ? 'var(--color-coral)'
-                  : 'var(--color-clay-muted)',
+                ? 'var(--brand-green)'
+                : isSlightlyOff
+                  ? 'var(--brand-amber)'
+                  : 'var(--color-error)',
             }}
           >
             Target: {Math.round(target)}{unit}

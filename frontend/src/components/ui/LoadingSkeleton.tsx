@@ -10,8 +10,9 @@ interface LoadingSkeletonProps {
 }
 
 /**
- * Loading skeleton with botanical shimmer effect.
- * Uses sage-tinted gradients that sweep across the surface.
+ * Loading skeleton with FedRight dark shimmer effect.
+ * Uses the .skeleton CSS class from globals.css which applies
+ * the shimmer gradient between --bg-secondary and --bg-hover.
  */
 export function LoadingSkeleton({ rows = 1, height = 'md', className }: LoadingSkeletonProps) {
   const heightStyles = {
@@ -26,14 +27,11 @@ export function LoadingSkeleton({ rows = 1, height = 'md', className }: LoadingS
         <div
           key={index}
           className={cn(
-            'rounded-lg animate-shimmer',
+            // .skeleton class from globals.css handles shimmer gradient + animation
+            'skeleton',
             heightStyles[height],
             index === rows - 1 && rows > 1 ? 'w-3/4' : 'w-full'
           )}
-          style={{
-            background: 'linear-gradient(90deg, var(--color-sage-mist) 25%, var(--color-cream-warm) 50%, var(--color-sage-mist) 75%)',
-            backgroundSize: '200% 100%',
-          }}
         />
       ))}
     </div>
@@ -46,29 +44,23 @@ export function LoadingSkeleton({ rows = 1, height = 'md', className }: LoadingS
 export function CardSkeleton() {
   return (
     <div
-      className="rounded-2xl p-6"
+      className="rounded-[var(--radius-lg)] p-6"
       style={{
-        background: 'var(--surface-primary)',
-        border: '1px solid var(--surface-glass-border)',
-        boxShadow: 'var(--shadow-sm)',
+        background: 'var(--bg-secondary)',
+        border: '1px solid var(--surface-border)',
+        boxShadow: 'var(--shadow-md)',
       }}
     >
-      <div
-        className="h-6 rounded-lg w-1/3 mb-4 animate-shimmer"
-        style={{
-          background: 'linear-gradient(90deg, var(--color-sage-mist) 25%, var(--color-cream-warm) 50%, var(--color-sage-mist) 75%)',
-          backgroundSize: '200% 100%',
-        }}
-      />
+      {/* Title skeleton */}
+      <div className="skeleton h-6 rounded-lg w-1/3 mb-4" />
+      {/* Body line skeletons at 100%, 83%, 67% widths */}
       <div className="space-y-3">
         {[1, 0.83, 0.67].map((width, i) => (
           <div
             key={i}
-            className="h-4 rounded-lg animate-shimmer"
+            className="skeleton h-4 rounded-lg"
             style={{
               width: `${width * 100}%`,
-              background: 'linear-gradient(90deg, var(--color-sage-mist) 25%, var(--color-cream-warm) 50%, var(--color-sage-mist) 75%)',
-              backgroundSize: '200% 100%',
               animationDelay: `${i * 0.1}s`,
             }}
           />
@@ -79,7 +71,8 @@ export function CardSkeleton() {
 }
 
 /**
- * Spinner with emerald/amber gradient ring.
+ * Spinner with brand green ring.
+ * Uses --brand-green for the active arc and --surface-border for the track.
  */
 export function Spinner({ size = 'md', className }: { size?: 'sm' | 'md' | 'lg'; className?: string }) {
   const sizeStyles = {
@@ -93,8 +86,8 @@ export function Spinner({ size = 'md', className }: { size?: 'sm' | 'md' | 'lg';
       <div
         className={cn('animate-spin rounded-full', sizeStyles[size])}
         style={{
-          border: '2.5px solid var(--color-sage-mist)',
-          borderTopColor: 'var(--color-emerald)',
+          border: '2.5px solid var(--surface-border)',
+          borderTopColor: 'var(--brand-green)',
         }}
       />
     </div>

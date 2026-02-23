@@ -17,7 +17,7 @@ interface CardHeaderProps {
 }
 
 /**
- * Card component with botanical luxe glassmorphic surface.
+ * Card component with FedRight dark glassmorphic surface.
  * Provides a refined container with subtle transparency, warm borders,
  * and organic shadow treatment.
  */
@@ -41,10 +41,10 @@ export function Card({ children, className, padding = 'md', hover = false, glass
       style={{
         ...(!glass
           ? {
-              background: 'var(--surface-primary)',
+              background: 'var(--surface-glass)',
               backdropFilter: 'blur(var(--glass-blur)) saturate(var(--glass-saturate))',
               WebkitBackdropFilter: 'blur(var(--glass-blur)) saturate(var(--glass-saturate))',
-              border: '1px solid var(--surface-glass-border)',
+              border: '1px solid var(--surface-border)',
               boxShadow: hover ? undefined : 'var(--shadow-sm)',
             }
           : {}),
@@ -72,7 +72,7 @@ export function Card({ children, className, padding = 'md', hover = false, glass
  */
 Card.Header = function CardHeader({ children, className }: CardHeaderProps) {
   return (
-    <div className={cn('mb-4 pb-4', className)} style={{ borderBottom: '1px solid var(--surface-glass-border)' }}>
+    <div className={cn('mb-4 pb-4', className)} style={{ borderBottom: '1px solid var(--surface-border)' }}>
       {children}
     </div>
   );
@@ -90,7 +90,7 @@ Card.Body = function CardBody({ children, className }: CardHeaderProps) {
  */
 Card.Footer = function CardFooter({ children, className }: CardHeaderProps) {
   return (
-    <div className={cn('mt-4 pt-4', className)} style={{ borderTop: '1px solid var(--surface-glass-border)' }}>
+    <div className={cn('mt-4 pt-4', className)} style={{ borderTop: '1px solid var(--surface-border)' }}>
       {children}
     </div>
   );

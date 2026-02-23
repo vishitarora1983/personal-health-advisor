@@ -1,9 +1,21 @@
 """
 Meals router for individual meal operations.
 
-Handles meal swap functionality (meal replacement with AI-generated alternatives).
+Handles meal swap, custom meal replacement, copy-to, and share-with-kids.
+
+Phase 4 (Joint Profile Orchestration) adds:
+  - Joint-profile branching in swap_meal, replace_with_custom_meal, and copy_meal_to
+  - MealMemberServing copy in copy_meal_to
+  - No change to share_with_kids (orthogonal feature)
+
+C4 (Architecture): The local load_member_targets helper has been removed.  Its
+logic is now provided by load_joint_members + build_member_targets from
+services.family_helpers (the single canonical source).  sum_member_servings and
+store_member_servings are also imported from there, replacing the old cross-router
+imports from routers.meal_plan.
 """
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import timedelta
@@ -11,19 +23,57 @@ import json
 import re
 
 from database import get_db
+from models.user import User
 from models.profile import UserProfile
 from models.meal_plan import WeeklyPlan, DailyPlan, Meal
 from models.meal_kid_share import MealKidShare
+from models.meal_member_serving import MealMemberServing
 from schemas.meal_plan import (
     SwapMealRequest, SwapMealResponse,
     CustomMealRequest, CustomMealResponse,
     CopyMealRequest, CopyMealResponse,
     MealResponse, KidShareInfo,
+    MealMemberServingSchema,
     ShareWithKidsRequest, ShareWithKidsResponse,
 )
 from services.ai_meal_planner import AIMealPlanner
 from services.nutrition_calculator import calculate_targets
+from services.portion_optimizer import PortionOptimizer
+# C4: shared helpers — canonical source replaces both the old cross-router import
+# (routers.meal_plan._sum_member_servings / _store_member_servings) and the local
+# load_member_targets duplicate defined further below.
+from services.family_helpers import (
+    load_joint_members,
+    build_member_targets,
+    sum_member_servings,
+    store_member_servings,
+)
+from auth import get_current_user
 
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Ownership helper
+# =============================================================================
+
+def _verify_meal_ownership(db: Session, meal_id: int, user: User) -> Meal:
+    """Get a meal, verifying it belongs to the current user via plan -> profile chain."""
+    meal = db.query(Meal).filter(Meal.id == meal_id).first()
+    if not meal:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Meal with id {meal_id} not found")
+    daily_plan = db.query(DailyPlan).filter(DailyPlan.id == meal.daily_plan_id).first()
+    weekly_plan = db.query(WeeklyPlan).filter(WeeklyPlan.id == daily_plan.weekly_plan_id).first()
+    profile = db.query(UserProfile).filter(UserProfile.id == weekly_plan.profile_id).first()
+    if not profile or profile.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Meal with id {meal_id} not found")
+    return meal
+
+
+# =============================================================================
+# Utility helpers
+# =============================================================================
 
 def scale_portion_string(portion_size: str, ratio: float) -> str:
     """Scale numeric quantities in a portion string by a ratio.
@@ -56,21 +106,11 @@ router = APIRouter(prefix="/meals", tags=["Meals"])
 @router.post("/{meal_id}/recipe", response_model=MealResponse, status_code=status.HTTP_200_OK)
 async def generate_recipe(
     meal_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """
-    Generate recipe (ingredients + recipe_brief) for a single meal on demand.
-
-    If the meal already has ingredients, returns immediately (cached).
-    Otherwise calls AI to generate and persists the recipe.
-    """
-    meal = db.query(Meal).filter(Meal.id == meal_id).first()
-
-    if not meal:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Meal with id {meal_id} not found"
-        )
+    """Generate recipe (ingredients + recipe_brief) for a single meal on demand."""
+    meal = _verify_meal_ownership(db, meal_id, current_user)
 
     # If recipe already exists, return immediately (cached)
     if meal.ingredients is not None:
@@ -107,9 +147,10 @@ async def generate_recipe(
 
     except Exception as e:
         db.rollback()
+        logger.exception(f"Failed to generate recipe for meal {meal_id}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate recipe: {str(e)}"
+            detail="Failed to generate recipe. Please try again."
         )
 
 
@@ -117,43 +158,172 @@ async def generate_recipe(
 async def swap_meal(
     meal_id: int,
     swap_request: SwapMealRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Swap a single meal with an AI-generated alternative.
 
-    Generates a new meal that matches the nutritional profile of the original
-    while being completely different in cuisine and ingredients.
-
-    Args:
-        meal_id: ID of the meal to swap
-        swap_request: Optional reason for swap
-        db: Database session dependency
-
-    Returns:
-        SwapMealResponse: Success message with new meal details
-
-    Raises:
-        HTTPException 404: If meal not found
-        HTTPException 500: If AI generation fails
+    For joint profiles, calls swap_family_meal which produces per-member servings.
+    For solo profiles, the existing single-profile swap path is used unchanged.
     """
-    # Get the meal to swap
-    meal = db.query(Meal).filter(Meal.id == meal_id).first()
-
-    if not meal:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Meal with id {meal_id} not found"
-        )
+    meal = _verify_meal_ownership(db, meal_id, current_user)
 
     # Get daily plan and profile
     daily_plan = db.query(DailyPlan).filter(DailyPlan.id == meal.daily_plan_id).first()
     weekly_plan = db.query(WeeklyPlan).filter(WeeklyPlan.id == daily_plan.weekly_plan_id).first()
     profile = db.query(UserProfile).filter(UserProfile.id == weekly_plan.profile_id).first()
 
-    # Get all meals for this day (to avoid duplication)
+    # Get all meals for this day (to avoid duplication in the AI prompt)
     day_meals = db.query(Meal).filter(Meal.daily_plan_id == daily_plan.id).all()
 
+    # Initialize AI meal planner
+    ai_planner = AIMealPlanner()
+
+    # -----------------------------------------------------------------------
+    # JOINT PROFILE PATH
+    # -----------------------------------------------------------------------
+    if profile.is_joint:
+        workflow       = current_user.family_meal_workflow
+        if workflow not in ("hybrid", "llm_only"):
+            workflow = "hybrid"
+        # C4: canonical two-step pattern from services.family_helpers
+        member_targets = build_member_targets(load_joint_members(db, profile))
+
+        # Build meal dict for the AI call
+        meal_dict = {
+            "id":        meal.id,
+            "meal_type": meal.meal_type,
+            "dish_name": meal.dish_name,
+            "calories":  meal.calories,
+            "protein":   meal.protein,
+            "carbs":     meal.carbs,
+            "fats":      meal.fats,
+            "fiber":     meal.fiber,
+        }
+        day_meals_list = [
+            {
+                "id":        m.id,
+                "meal_type": m.meal_type,
+                "dish_name": m.dish_name,
+                "calories":  m.calories,
+                "protein":   m.protein,
+                "carbs":     m.carbs,
+                "fats":      m.fats,
+            }
+            for m in day_meals
+        ]
+
+        try:
+            new_meal_data = await ai_planner.swap_family_meal(
+                meal=meal_dict,
+                day_meals=day_meals_list,
+                profile=profile,
+                member_targets=member_targets,
+                workflow=workflow,
+                reason=swap_request.reason if swap_request else None,
+            )
+            new_meal_inner = new_meal_data["meal"]
+
+            # If hybrid: run LP on the new meal's components to produce
+            # per_member_nutrition + allocations
+            if workflow == "hybrid" and new_meal_inner.get("components"):
+                optimizer = PortionOptimizer()
+                result = optimizer.allocate(
+                    components=new_meal_inner["components"],
+                    member_targets=member_targets,
+                    meal_type=meal.meal_type,
+                )
+                if result.feasible:
+                    new_meal_inner["allocations"]          = result.allocations
+                    new_meal_inner["per_member_nutrition"] = result.per_member_nutrition
+                else:
+                    # LP infeasible on hybrid swap — fall back to llm_only for this meal
+                    logger.warning(
+                        f"[swap_meal] LP infeasible after hybrid swap of meal "
+                        f"{meal.id}. Retrying as llm_only."
+                    )
+                    new_meal_data = await ai_planner.swap_family_meal(
+                        meal=meal_dict,
+                        day_meals=day_meals_list,
+                        profile=profile,
+                        member_targets=member_targets,
+                        workflow="llm_only",
+                        reason=swap_request.reason if swap_request else None,
+                    )
+                    new_meal_inner = new_meal_data["meal"]
+
+            # Update Meal row with household totals
+            meal_totals = sum_member_servings(new_meal_inner)
+            meal.dish_name    = new_meal_inner.get("dish_name", meal.dish_name)
+            meal.description  = new_meal_inner.get("description")
+            meal.cuisine      = new_meal_inner.get("cuisine")
+            meal.portion_size = new_meal_inner.get("portion_size")
+            meal.calories     = meal_totals["calories"]
+            meal.protein      = meal_totals["protein"]
+            meal.carbs        = meal_totals["carbs"]
+            meal.fats         = meal_totals["fats"]
+            meal.fiber        = meal_totals.get("fiber")
+            meal.prep_time    = new_meal_inner.get("prep_time")
+            # Clear old recipe — regenerated on demand
+            meal.ingredients  = None
+            meal.recipe_brief = None
+
+            # Delete old MealMemberServing rows for this meal before inserting new ones.
+            # The UniqueConstraint on (meal_id, member_profile_id) requires explicit
+            # deletion rather than upsert.
+            db.query(MealMemberServing).filter(
+                MealMemberServing.meal_id == meal.id
+            ).delete()
+
+            # Insert new MealMemberServing rows from the swapped meal data
+            store_member_servings(db, meal.id, new_meal_inner, member_targets)
+
+            # Recalculate daily plan totals from current meal set
+            meals_in_day = db.query(Meal).filter(
+                Meal.daily_plan_id == daily_plan.id
+            ).all()
+            daily_plan.total_calories = sum(m.calories for m in meals_in_day)
+            daily_plan.total_protein  = sum(m.protein  for m in meals_in_day)
+            daily_plan.total_carbs    = sum(m.carbs    for m in meals_in_day)
+            daily_plan.total_fats     = sum(m.fats     for m in meals_in_day)
+
+            db.commit()
+            db.refresh(meal)
+
+            # Re-query the freshly-committed MealMemberServing rows so the response
+            # reflects the new per-member breakdown rather than the pre-swap state.
+            fresh_servings = (
+                db.query(MealMemberServing)
+                .filter(MealMemberServing.meal_id == meal.id)
+                .all()
+            )
+            servings_schemas = [
+                MealMemberServingSchema.from_orm_serving(s)
+                for s in fresh_servings
+            ]
+            new_meal_response = MealResponse.from_orm_with_ingredients(
+                meal,
+                member_servings=servings_schemas if servings_schemas else None,
+            )
+            return SwapMealResponse(
+                message="Meal swapped successfully",
+                new_meal=new_meal_response,
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            db.rollback()
+            logger.exception(f"Failed to swap family meal {meal_id}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to swap family meal. Please try again."
+            )
+
+    # -----------------------------------------------------------------------
+    # NON-JOINT PATH (unchanged from pre-Phase-4 behaviour)
+    # -----------------------------------------------------------------------
     # Convert meal to dict for AI
     meal_dict = {
         "meal_type": meal.meal_type,
@@ -177,9 +347,6 @@ async def swap_meal(
         }
         for m in day_meals
     ]
-
-    # Initialize AI meal planner
-    ai_planner = AIMealPlanner()
 
     try:
         # Generate replacement meal
@@ -209,9 +376,9 @@ async def swap_meal(
         # Update daily plan totals
         meals_in_day = db.query(Meal).filter(Meal.daily_plan_id == daily_plan.id).all()
         daily_plan.total_calories = sum(m.calories for m in meals_in_day)
-        daily_plan.total_protein = sum(m.protein for m in meals_in_day)
-        daily_plan.total_carbs = sum(m.carbs for m in meals_in_day)
-        daily_plan.total_fats = sum(m.fats for m in meals_in_day)
+        daily_plan.total_protein  = sum(m.protein  for m in meals_in_day)
+        daily_plan.total_carbs    = sum(m.carbs    for m in meals_in_day)
+        daily_plan.total_fats     = sum(m.fats     for m in meals_in_day)
 
         db.commit()
         db.refresh(meal)
@@ -226,9 +393,10 @@ async def swap_meal(
 
     except Exception as e:
         db.rollback()
+        logger.exception(f"Failed to swap meal {meal_id}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to swap meal: {str(e)}"
+            detail="Failed to swap meal. Please try again."
         )
 
 
@@ -236,40 +404,156 @@ async def swap_meal(
 async def replace_with_custom_meal(
     meal_id: int,
     request: CustomMealRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Replace a meal with a user-described custom dish.
 
-    Sends the description to AI for nutritional analysis, then updates
-    the meal record with the returned data.
-
-    Args:
-        meal_id: ID of the meal to replace
-        request: Custom meal description
-        db: Database session dependency
-
-    Returns:
-        CustomMealResponse: Updated meal with nutritional info and any dietary warnings
+    For joint profiles, the AI prompt is augmented with per-member context so the
+    model can produce member_servings. If the LLM omits member_servings, an
+    equal-split fallback is applied. For solo profiles, the existing path is used.
     """
-    # Get the meal to replace
-    meal = db.query(Meal).filter(Meal.id == meal_id).first()
-
-    if not meal:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Meal with id {meal_id} not found"
-        )
+    meal = _verify_meal_ownership(db, meal_id, current_user)
 
     # Get daily plan and profile
     daily_plan = db.query(DailyPlan).filter(DailyPlan.id == meal.daily_plan_id).first()
     weekly_plan = db.query(WeeklyPlan).filter(WeeklyPlan.id == daily_plan.weekly_plan_id).first()
     profile = db.query(UserProfile).filter(UserProfile.id == weekly_plan.profile_id).first()
 
+    ai_planner = AIMealPlanner()
+
+    # -----------------------------------------------------------------------
+    # JOINT PROFILE PATH
+    # -----------------------------------------------------------------------
+    if profile.is_joint:
+        workflow       = current_user.family_meal_workflow
+        if workflow not in ("hybrid", "llm_only"):
+            workflow = "hybrid"
+        # C4: canonical two-step pattern from services.family_helpers
+        member_targets = build_member_targets(load_joint_members(db, profile))
+
+        try:
+            # Build an extended description that includes member context so the LLM
+            # can produce per-member servings rather than a single aggregate entry.
+            member_context = "\n".join([
+                f"- {m['name']}: {m['target_calories']} kcal/day, "
+                f"goals: {', '.join(m['medical_goals']) if m['medical_goals'] else 'none'}"
+                for m in member_targets
+            ])
+            augmented_description = (
+                f"{request.description}\n\n"
+                f"[Family context — please provide member_servings for each member:\n"
+                f"{member_context}]"
+            )
+
+            result = await ai_planner.analyze_custom_meal(
+                description=augmented_description,
+                meal_type=meal.meal_type,
+                profile=profile,
+                nutrition_targets=None,
+            )
+            new_meal_data = result["meal"]
+            warnings      = result.get("warnings", [])
+
+            # If the LLM returned member_servings, use them; otherwise apply equal-split
+            # fallback: divide top-level totals equally among all members. This ensures
+            # every joint-profile custom meal always has serving rows in the DB.
+            if not new_meal_data.get("member_servings"):
+                logger.warning(
+                    f"[replace_with_custom_meal] LLM did not produce member_servings "
+                    f"for joint profile {profile.id} — applying equal-split fallback."
+                )
+                n = len(member_targets)
+                # Guard against division by zero (should never happen with a valid joint profile)
+                if n < 1:
+                    n = 1
+                new_meal_data["member_servings"] = [
+                    {
+                        "member_name":         m["name"],
+                        "adjustment":          "Standard equal portion",
+                        "portion_description": "Equal share",
+                        "calories": round(new_meal_data.get("calories", 0) / n, 1),
+                        "protein":  round(new_meal_data.get("protein",  0) / n, 1),
+                        "carbs":    round(new_meal_data.get("carbs",    0) / n, 1),
+                        "fats":     round(new_meal_data.get("fats",     0) / n, 1),
+                        "fiber":    round((new_meal_data.get("fiber") or 0) / n, 1),
+                        "profile_id": m["profile_id"],
+                    }
+                    for m in member_targets
+                ]
+
+            # Update Meal row with household totals
+            meal_totals = sum_member_servings(new_meal_data)
+            meal.dish_name    = new_meal_data.get("dish_name", meal.dish_name)
+            meal.description  = new_meal_data.get("description")
+            meal.cuisine      = new_meal_data.get("cuisine")
+            meal.portion_size = new_meal_data.get("portion_size")
+            meal.calories     = meal_totals["calories"]
+            meal.protein      = meal_totals["protein"]
+            meal.carbs        = meal_totals["carbs"]
+            meal.fats         = meal_totals["fats"]
+            meal.fiber        = meal_totals.get("fiber")
+            meal.sodium       = new_meal_data.get("sodium")
+            meal.sugar        = new_meal_data.get("sugar")
+            meal.prep_time    = new_meal_data.get("prep_time")
+            # Clear old recipe — regenerated on demand
+            meal.ingredients  = None
+            meal.recipe_brief = None
+
+            # Delete and re-insert MealMemberServing rows
+            db.query(MealMemberServing).filter(
+                MealMemberServing.meal_id == meal.id
+            ).delete()
+            store_member_servings(db, meal.id, new_meal_data, member_targets)
+
+            # Recalculate daily plan totals
+            meals_in_day = db.query(Meal).filter(
+                Meal.daily_plan_id == daily_plan.id
+            ).all()
+            daily_plan.total_calories = sum(m.calories for m in meals_in_day)
+            daily_plan.total_protein  = sum(m.protein  for m in meals_in_day)
+            daily_plan.total_carbs    = sum(m.carbs    for m in meals_in_day)
+            daily_plan.total_fats     = sum(m.fats     for m in meals_in_day)
+
+            db.commit()
+            db.refresh(meal)
+
+            # Re-query freshly-committed MealMemberServing rows so the response
+            # reflects the new per-member breakdown (equal-split or LLM-generated).
+            fresh_servings = (
+                db.query(MealMemberServing)
+                .filter(MealMemberServing.meal_id == meal.id)
+                .all()
+            )
+            servings_schemas = [
+                MealMemberServingSchema.from_orm_serving(s)
+                for s in fresh_servings
+            ]
+            return CustomMealResponse(
+                message="Meal replaced with custom dish",
+                new_meal=MealResponse.from_orm_with_ingredients(
+                    meal,
+                    member_servings=servings_schemas if servings_schemas else None,
+                ),
+                warnings=warnings if warnings else None,
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            db.rollback()
+            logger.exception(f"Failed to replace custom meal in family plan for meal {meal_id}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to replace custom meal. Please try again."
+            )
+
+    # -----------------------------------------------------------------------
+    # NON-JOINT PATH (unchanged from pre-Phase-4 behaviour)
+    # -----------------------------------------------------------------------
     # Calculate nutrition targets for portion sizing guidance
     nutrition_targets = calculate_targets(profile)
-
-    ai_planner = AIMealPlanner()
 
     try:
         result = await ai_planner.analyze_custom_meal(
@@ -301,9 +585,9 @@ async def replace_with_custom_meal(
         # Update daily plan totals
         meals_in_day = db.query(Meal).filter(Meal.daily_plan_id == daily_plan.id).all()
         daily_plan.total_calories = sum(m.calories for m in meals_in_day)
-        daily_plan.total_protein = sum(m.protein for m in meals_in_day)
-        daily_plan.total_carbs = sum(m.carbs for m in meals_in_day)
-        daily_plan.total_fats = sum(m.fats for m in meals_in_day)
+        daily_plan.total_protein  = sum(m.protein  for m in meals_in_day)
+        daily_plan.total_carbs    = sum(m.carbs    for m in meals_in_day)
+        daily_plan.total_fats     = sum(m.fats     for m in meals_in_day)
 
         db.commit()
         db.refresh(meal)
@@ -318,9 +602,10 @@ async def replace_with_custom_meal(
 
     except Exception as e:
         db.rollback()
+        logger.exception(f"Failed to analyze custom meal for meal {meal_id}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to analyze custom meal: {str(e)}"
+            detail="Failed to analyze custom meal. Please try again."
         )
 
 
@@ -328,28 +613,19 @@ async def replace_with_custom_meal(
 async def copy_meal_to(
     meal_id: int,
     request: CopyMealRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
-    Copy a meal's data to another meal slot. No AI call — pure data copy.
+    Copy a meal's data to another meal slot. No AI call.
 
-    Copies all nutritional/display fields from source to target,
-    clears recipe on target (regenerated on demand), and recalculates
-    the target day's daily totals.
+    For joint profile plans, MealMemberServing rows are copied from the source
+    meal to the target meal so that per-member serving data is preserved. If the
+    source belongs to a joint profile but the target does not (unusual edge case
+    when copying across profiles), the serving copy is skipped.
     """
-    source = db.query(Meal).filter(Meal.id == meal_id).first()
-    if not source:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Source meal with id {meal_id} not found"
-        )
-
-    target = db.query(Meal).filter(Meal.id == request.target_meal_id).first()
-    if not target:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Target meal with id {request.target_meal_id} not found"
-        )
+    source = _verify_meal_ownership(db, meal_id, current_user)
+    target = _verify_meal_ownership(db, request.target_meal_id, current_user)
 
     if source.id == target.id:
         raise HTTPException(
@@ -358,36 +634,94 @@ async def copy_meal_to(
         )
 
     # Copy display and nutritional fields
-    target.dish_name = source.dish_name
-    target.description = source.description
-    target.cuisine = source.cuisine
+    target.dish_name    = source.dish_name
+    target.description  = source.description
+    target.cuisine      = source.cuisine
     target.portion_size = source.portion_size
-    target.calories = source.calories
-    target.protein = source.protein
-    target.carbs = source.carbs
-    target.fats = source.fats
-    target.fiber = source.fiber
-    target.sodium = source.sodium
-    target.sugar = source.sugar
-    target.prep_time = source.prep_time
+    target.calories     = source.calories
+    target.protein      = source.protein
+    target.carbs        = source.carbs
+    target.fats         = source.fats
+    target.fiber        = source.fiber
+    target.sodium       = source.sodium
+    target.sugar        = source.sugar
+    target.prep_time    = source.prep_time
     # Clear recipe — regenerated on demand
-    target.ingredients = None
+    target.ingredients  = None
     target.recipe_brief = None
+
+    # -----------------------------------------------------------------------
+    # Copy MealMemberServing rows for joint profile plans
+    #
+    # Determine whether the source meal belongs to a joint profile by
+    # navigating the DailyPlan → WeeklyPlan → UserProfile chain.
+    # -----------------------------------------------------------------------
+    source_profile = (
+        db.query(UserProfile)
+        .join(WeeklyPlan, WeeklyPlan.profile_id == UserProfile.id)
+        .join(DailyPlan, DailyPlan.weekly_plan_id == WeeklyPlan.id)
+        .filter(DailyPlan.id == source.daily_plan_id)
+        .first()
+    )
+
+    if source_profile and source_profile.is_joint:
+        # Delete target's existing MealMemberServing rows (if any) before copying.
+        # The UniqueConstraint on (meal_id, member_profile_id) prevents duplicates
+        # if the target already had serving rows from a previous joint-profile generation.
+        db.query(MealMemberServing).filter(
+            MealMemberServing.meal_id == target.id
+        ).delete()
+
+        # Copy each source MealMemberServing row to the target meal
+        source_servings = (
+            db.query(MealMemberServing)
+            .filter(MealMemberServing.meal_id == source.id)
+            .all()
+        )
+        for s in source_servings:
+            new_serving = MealMemberServing(
+                meal_id=target.id,
+                member_profile_id=s.member_profile_id,
+                member_name=s.member_name,
+                adjustment=s.adjustment,
+                portion_description=s.portion_description,
+                calories=s.calories,
+                protein=s.protein,
+                carbs=s.carbs,
+                fats=s.fats,
+                fiber=s.fiber,
+            )
+            db.add(new_serving)
 
     # Recalculate target day's daily totals
     target_daily_plan = db.query(DailyPlan).filter(DailyPlan.id == target.daily_plan_id).first()
     meals_in_day = db.query(Meal).filter(Meal.daily_plan_id == target_daily_plan.id).all()
     target_daily_plan.total_calories = sum(m.calories for m in meals_in_day)
-    target_daily_plan.total_protein = sum(m.protein for m in meals_in_day)
-    target_daily_plan.total_carbs = sum(m.carbs for m in meals_in_day)
-    target_daily_plan.total_fats = sum(m.fats for m in meals_in_day)
+    target_daily_plan.total_protein  = sum(m.protein  for m in meals_in_day)
+    target_daily_plan.total_carbs    = sum(m.carbs    for m in meals_in_day)
+    target_daily_plan.total_fats     = sum(m.fats     for m in meals_in_day)
 
     db.commit()
     db.refresh(target)
 
+    # Re-query freshly-committed MealMemberServing rows on the target so the response
+    # includes the copied per-member breakdown for joint profile plans. For solo plans,
+    # fresh_servings will be empty and member_servings=None preserves backward compat.
+    fresh_servings = (
+        db.query(MealMemberServing)
+        .filter(MealMemberServing.meal_id == target.id)
+        .all()
+    )
+    servings_schemas = [
+        MealMemberServingSchema.from_orm_serving(s)
+        for s in fresh_servings
+    ]
     return CopyMealResponse(
         message="Meal copied successfully",
-        new_meal=MealResponse.from_orm_with_ingredients(target)
+        new_meal=MealResponse.from_orm_with_ingredients(
+            target,
+            member_servings=servings_schemas if servings_schemas else None,
+        ),
     )
 
 
@@ -406,28 +740,30 @@ def _recalculate_daily_totals(db: Session, daily_plan):
     """Recalculate a daily plan's nutrition totals from its meals."""
     meals = db.query(Meal).filter(Meal.daily_plan_id == daily_plan.id).all()
     daily_plan.total_calories = sum(m.calories for m in meals)
-    daily_plan.total_protein = sum(m.protein for m in meals)
-    daily_plan.total_carbs = sum(m.carbs for m in meals)
-    daily_plan.total_fats = sum(m.fats for m in meals)
-
+    daily_plan.total_protein  = sum(m.protein  for m in meals)
+    daily_plan.total_carbs    = sum(m.carbs    for m in meals)
+    daily_plan.total_fats     = sum(m.fats     for m in meals)
 
 
 @router.post("/{meal_id}/share-with-kids", response_model=ShareWithKidsResponse, status_code=status.HTTP_200_OK)
 def share_with_kids(
     meal_id: int,
     request: ShareWithKidsRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Share (or unshare) a meal with kid profiles.
 
-    Sets the desired kid_profile_ids for this meal. Newly added kids get a
-    scaled copy of the meal in their plan. Removed kids have the shared meal
-    deleted from their plan.
+    This endpoint is unchanged by the Phase 4 joint-profile redesign.
+    MealKidShare and MealMemberServing are orthogonal features:
+      - MealKidShare: adult shares a scaled version of their meal with a kid profile
+      - MealMemberServing: joint profiles store per-household-member portion data
+
+    Kid sharing is only meaningful for solo (non-joint) profiles. For joint profiles,
+    all household members are already represented via MealMemberServing rows.
     """
-    meal = db.query(Meal).filter(Meal.id == meal_id).first()
-    if not meal:
-        raise HTTPException(status_code=404, detail=f"Meal {meal_id} not found")
+    meal = _verify_meal_ownership(db, meal_id, current_user)
 
     # Navigate up to get the adult profile and week context
     daily_plan = db.query(DailyPlan).filter(DailyPlan.id == meal.daily_plan_id).first()
@@ -572,4 +908,8 @@ def share_with_kids(
 
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to share meal: {str(e)}")
+        logger.exception(f"Failed to share meal {meal_id} with kids")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update meal sharing. Please try again."
+        )

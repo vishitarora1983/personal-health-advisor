@@ -52,10 +52,10 @@ export function ProfileSelector({
           className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all"
           style={{
             background: allSelected
-              ? 'rgba(45, 90, 63, 0.10)'
-              : 'rgba(74, 63, 53, 0.04)',
-            border: `1px solid ${allSelected ? 'rgba(45, 90, 63, 0.20)' : 'rgba(74, 63, 53, 0.10)'}`,
-            color: allSelected ? 'var(--color-emerald)' : 'var(--color-clay-light)',
+              ? 'var(--brand-green-border)'
+              : 'var(--surface-glass)',
+            border: `1px solid ${allSelected ? 'var(--brand-green-glow)' : 'var(--surface-border)'}`,
+            color: allSelected ? 'var(--brand-green)' : 'var(--text-secondary)',
             opacity: loading ? 0.5 : 1,
             cursor: loading ? 'not-allowed' : 'pointer',
           }}
@@ -64,9 +64,9 @@ export function ProfileSelector({
             className="flex items-center justify-center w-5 h-5 rounded-md transition-all"
             style={{
               background: allSelected
-                ? 'var(--color-emerald)'
-                : 'rgba(74, 63, 53, 0.08)',
-              border: allSelected ? 'none' : '1px solid rgba(74, 63, 53, 0.15)',
+                ? 'var(--brand-green)'
+                : 'var(--surface-glass-hover)',
+              border: allSelected ? 'none' : '1px solid var(--surface-border)',
             }}
           >
             {allSelected && <Check className="h-3 w-3 text-white" />}
@@ -77,7 +77,7 @@ export function ProfileSelector({
         {/* Divider */}
         <div
           className="w-px h-8"
-          style={{ background: 'var(--surface-glass-border)' }}
+          style={{ background: 'var(--surface-border)' }}
         />
 
         {/* Profile chips */}
@@ -93,9 +93,9 @@ export function ProfileSelector({
               className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all"
               style={{
                 background: selected
-                  ? 'linear-gradient(135deg, rgba(212, 148, 10, 0.10), rgba(212, 148, 10, 0.05))'
-                  : 'rgba(74, 63, 53, 0.04)',
-                border: `1px solid ${selected ? 'rgba(212, 148, 10, 0.25)' : 'rgba(74, 63, 53, 0.10)'}`,
+                  ? 'var(--brand-amber-subtle)'
+                  : 'var(--surface-glass)',
+                border: `1px solid ${selected ? 'var(--brand-amber-glow)' : 'var(--surface-border)'}`,
                 opacity: loading ? 0.5 : 1,
                 cursor: loading ? 'not-allowed' : 'pointer',
               }}
@@ -105,9 +105,9 @@ export function ProfileSelector({
                 className="flex items-center justify-center w-5 h-5 rounded-md transition-all shrink-0"
                 style={{
                   background: selected
-                    ? 'linear-gradient(135deg, var(--color-amber), var(--color-amber-warm))'
-                    : 'rgba(74, 63, 53, 0.08)',
-                  border: selected ? 'none' : '1px solid rgba(74, 63, 53, 0.15)',
+                    ? 'linear-gradient(135deg, var(--brand-amber), var(--brand-amber-light))'
+                    : 'var(--surface-glass-hover)',
+                  border: selected ? 'none' : '1px solid var(--surface-border)',
                 }}
               >
                 {selected && <Check className="h-3 w-3 text-white" />}
@@ -118,9 +118,9 @@ export function ProfileSelector({
                 className="flex items-center justify-center w-6 h-6 rounded-md text-xs font-bold shrink-0"
                 style={{
                   background: selected
-                    ? 'linear-gradient(135deg, var(--color-amber), var(--color-amber-warm))'
+                    ? 'linear-gradient(135deg, var(--brand-amber), var(--brand-amber-light))'
                     : 'rgba(168, 197, 176, 0.15)',
-                  color: selected ? 'white' : 'var(--color-clay-light)',
+                  color: selected ? 'white' : 'var(--text-secondary)',
                 }}
               >
                 {getInitial(profile.name)}
@@ -129,7 +129,7 @@ export function ProfileSelector({
               <span
                 className="font-medium"
                 style={{
-                  color: selected ? 'var(--color-emerald-deep)' : 'var(--color-clay-light)',
+                  color: selected ? 'var(--brand-green-dark)' : 'var(--text-secondary)',
                 }}
               >
                 {profile.name}
@@ -138,7 +138,7 @@ export function ProfileSelector({
               {profile.is_joint && (
                 <Users
                   className="h-3.5 w-3.5 shrink-0"
-                  style={{ color: selected ? 'var(--color-amber)' : 'var(--color-clay-subtle)' }}
+                  style={{ color: selected ? 'var(--brand-amber)' : 'var(--text-muted)' }}
                 />
               )}
 
@@ -146,7 +146,7 @@ export function ProfileSelector({
                 <span title="No active meal plan">
                   <AlertCircle
                     className="h-3.5 w-3.5 shrink-0"
-                    style={{ color: 'var(--color-amber)' }}
+                    style={{ color: 'var(--brand-amber)' }}
                   />
                 </span>
               )}
@@ -155,7 +155,7 @@ export function ProfileSelector({
         })}
 
         {profiles.length === 0 && (
-          <p className="text-sm" style={{ color: 'var(--color-clay-subtle)' }}>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
             No profiles found. Create profiles to use Chef&apos;s View.
           </p>
         )}

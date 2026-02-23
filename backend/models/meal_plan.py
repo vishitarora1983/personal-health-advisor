@@ -270,6 +270,25 @@ class Meal(Base):
         uselist=False,  # One-to-one relationship
         cascade="all, delete-orphan"
     )
+    # Per-member servings for joint profile plans.
+    # Only populated when this meal belongs to a joint profile WeeklyPlan.
+    # For solo profile plans, this list is always empty.
+    #
+    # cascade="all, delete-orphan" ensures MealMemberServing rows are removed
+    # automatically by SQLAlchemy when a Meal is deleted via ORM (db.delete(meal)).
+    # This complements the FK ondelete="CASCADE" on MealMemberServing.meal_id,
+    # which handles raw SQL DELETEs that bypass the ORM session.
+    #
+    # lazy="select" (SQLAlchemy default) is intentional: member_servings are
+    # only needed when rendering the joint profile meal plan view. The
+    # _build_weekly_plan_response() helper in routers/meal_plan.py (Phase 4)
+    # will pre-load all member_servings in a single query to avoid N+1 issues.
+    member_servings = relationship(
+        "MealMemberServing",
+        back_populates="meal",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
 
     # Index for efficient daily plan queries
     __table_args__ = (

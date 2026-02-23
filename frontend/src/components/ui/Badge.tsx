@@ -12,42 +12,43 @@ interface BadgeProps {
 }
 
 /**
- * Badge component with botanical luxe color palette.
- * Uses emerald for success, amber for warning/info, coral for error.
+ * Badge component with FedRight dark design system semantic palette.
+ * Uses CSS custom property tokens — never hardcoded hex values.
+ * All variants use pill shape (--radius-full) per the design spec.
  */
 export function Badge({ children, variant = 'neutral', className }: BadgeProps) {
   const variantStyles: Record<BadgeVariant, React.CSSProperties> = {
     success: {
-      backgroundColor: 'rgba(45, 90, 63, 0.08)',
-      color: 'var(--color-emerald)',
-      borderColor: 'rgba(45, 90, 63, 0.15)',
+      backgroundColor: 'var(--color-success-bg)',
+      color: 'var(--color-success)',
+      borderColor: 'rgba(42, 175, 101, 0.20)',
     },
     warning: {
-      backgroundColor: 'rgba(212, 148, 10, 0.08)',
-      color: 'var(--color-amber)',
-      borderColor: 'rgba(212, 148, 10, 0.15)',
+      backgroundColor: 'var(--color-warning-bg)',
+      color: 'var(--color-warning)',
+      borderColor: 'rgba(240, 168, 48, 0.20)',
     },
     error: {
-      backgroundColor: 'rgba(212, 90, 58, 0.08)',
-      color: 'var(--color-coral)',
-      borderColor: 'rgba(212, 90, 58, 0.15)',
+      backgroundColor: 'var(--color-error-bg)',
+      color: 'var(--color-error)',
+      borderColor: 'rgba(229, 83, 75, 0.20)',
     },
     info: {
-      backgroundColor: 'rgba(42, 138, 122, 0.08)',
-      color: 'var(--color-teal-soft)',
-      borderColor: 'rgba(42, 138, 122, 0.15)',
+      backgroundColor: 'var(--color-info-bg)',
+      color: 'var(--color-info)',
+      borderColor: 'rgba(83, 155, 245, 0.20)',
     },
     neutral: {
-      backgroundColor: 'rgba(74, 63, 53, 0.06)',
-      color: 'var(--color-clay-light)',
-      borderColor: 'rgba(74, 63, 53, 0.10)',
+      backgroundColor: 'var(--surface-glass)',
+      color: 'var(--text-secondary)',
+      borderColor: 'var(--surface-border)',
     },
   };
 
   return (
     <span
       className={cn(
-        'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border',
+        'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border',
         className
       )}
       style={variantStyles[variant]}

@@ -53,35 +53,138 @@ class KidShareInfo(BaseModel):
     scale_ratio: float
 
 
+class MemberServingSchema(BaseModel):
+    """
+    Per-member serving data for one meal in a family/joint plan.
+
+    Populated by the hybrid generation workflow when the AI explicitly
+    assigns different portions or adjustments to different household members.
+    For example, a meal of "Rajma Rice + Salad" might produce:
+        - Adult (Vishit): 1 katori rajma, 1 katori rice, 1 bowl salad | 520 kcal
+        - Adult (Priya):  1 katori rajma, 0.5 katori rice, 2 bowls salad | 430 kcal
+        - Kid (Arya):     0.5 katori rajma, 0.5 katori rice, 1 bowl salad | 280 kcal
+
+    adjustment: Free-text modifications from the household plan for this member,
+        e.g. "half rice, extra salad, add cucumber raita". Null if the member
+        eats the standard portion.
+
+    portion_description: Human-readable description of the actual portion,
+        e.g. "1 katori rajma, 0.5 katori rice, 2 bowls salad". Null if the
+        AI did not generate a description.
+
+    Calorie/macro fields reflect this member's individual portion, not the
+    aggregate meal total.
+    """
+    member_profile_id: int
+    member_name: str
+    adjustment: Optional[str] = None
+    portion_description: Optional[str] = None
+    calories: float
+    protein: float
+    carbs: float
+    fats: float
+    fiber: Optional[float] = 0
+
+
+class MealMemberServingSchema(BaseModel):
+    """
+    Per-member serving breakdown for a single meal in a joint profile plan.
+
+    This is the API-facing schema returned by _build_weekly_plan_response when
+    loading MealMemberServing rows from the database. Unlike MemberServingSchema,
+    member_profile_id is Optional here because LP-allocated meals store member
+    data keyed by name (the LP solver does not resolve profile IDs), and historical
+    rows may have been inserted before profile resolution was added.
+
+    Fields:
+        member_name:         Denormalised display name for the household member.
+        member_profile_id:   FK to user_profiles.id. None when the row was created
+                             from LP allocations without explicit profile_id mapping.
+        adjustment:          LLM-generated adjustment text (e.g., "half rice, extra salad").
+        portion_description: Component-level serving description (e.g., "1.0 katori rajma").
+        calories/protein/carbs/fats/fiber: This member's individual macro share.
+    """
+    member_name: str
+    member_profile_id: Optional[int] = None
+    adjustment: Optional[str] = None
+    portion_description: Optional[str] = None
+    calories: float
+    protein: float
+    carbs: float
+    fats: float
+    fiber: Optional[float] = 0
+
+    @classmethod
+    def from_orm_serving(cls, obj) -> "MealMemberServingSchema":
+        """
+        Construct a MealMemberServingSchema from a MealMemberServing ORM object.
+
+        Centralises the field mapping so all call sites (meal_plan.py, meals.py)
+        use a single, consistent conversion instead of repeating the keyword
+        arguments inline. Using a named classmethod (not Pydantic's built-in
+        model_validate) keeps the conversion explicit and allows the fiber null
+        guard (`or 0`) to live in one place.
+
+        Args:
+            obj: A MealMemberServing ORM instance with member_name,
+                 member_profile_id, adjustment, portion_description,
+                 calories, protein, carbs, fats, and fiber attributes.
+
+        Returns:
+            MealMemberServingSchema populated from the ORM object.
+        """
+        return cls(
+            member_name=obj.member_name,
+            member_profile_id=obj.member_profile_id,
+            adjustment=obj.adjustment,
+            portion_description=obj.portion_description,
+            calories=obj.calories,
+            protein=obj.protein,
+            carbs=obj.carbs,
+            fats=obj.fats,
+            fiber=obj.fiber or 0,
+        )
+
+
 class MealResponse(MealSchema):
     """
     Response schema for a single meal including database ID.
 
     Used when returning individual meal details from the database.
+    member_servings is populated only for joint profile plans; it is None for
+    solo profile plans so the field is omitted from the JSON response entirely.
     """
     id: int = Field(description="Database ID of the meal")
     daily_plan_id: int = Field(description="Parent daily plan ID")
     shared_with_kids: Optional[List[KidShareInfo]] = None
+    member_servings: Optional[List[MealMemberServingSchema]] = None  # Per-member breakdown for joint/family plans
 
     model_config = {"from_attributes": True}
 
     @staticmethod
-    def from_orm_with_ingredients(meal_obj, kid_shares=None):
+    def from_orm_with_ingredients(meal_obj, kid_shares=None, member_servings=None):
         """
         Convert ORM meal object to response schema, deserializing ingredients.
 
         Args:
             meal_obj: SQLAlchemy Meal model instance
-            kid_shares: Optional list of KidShareInfo dicts for this meal
+            kid_shares: Optional list of KidShareInfo objects for this meal
+            member_servings: Optional list of MealMemberServingSchema objects for joint/family
+                             plans. Pass None (default) for individual profiles — the field will
+                             be omitted from the JSON response entirely.
 
         Returns:
-            MealResponse with deserialized ingredients
+            MealResponse with deserialized ingredients and optional per-member servings
         """
         # Deserialize ingredients from JSON
         ingredients = []
         if meal_obj.ingredients:
             try:
-                ingredients_data = json.loads(meal_obj.ingredients) if isinstance(meal_obj.ingredients, str) else meal_obj.ingredients
+                ingredients_data = (
+                    json.loads(meal_obj.ingredients)
+                    if isinstance(meal_obj.ingredients, str)
+                    else meal_obj.ingredients
+                )
                 ingredients = [IngredientSchema(**ing) for ing in ingredients_data]
             except (json.JSONDecodeError, TypeError):
                 ingredients = []
@@ -103,6 +206,7 @@ class MealResponse(MealSchema):
             ingredients=ingredients,
             recipe_brief=meal_obj.recipe_brief,
             shared_with_kids=kid_shares,
+            member_servings=member_servings,   # None for individual profiles; list for joint
         )
 
 
@@ -226,3 +330,9 @@ class ShareWithKidsResponse(BaseModel):
     message: str
     shares: List[KidShareInfo]
     updated_meal: MealResponse
+
+
+# Rebuild MealResponse after all forward references have been defined.
+# Required because MealMemberServingSchema is defined after MealResponse in this file;
+# Pydantic v2 uses model_rebuild() to resolve forward references lazily.
+MealResponse.model_rebuild()

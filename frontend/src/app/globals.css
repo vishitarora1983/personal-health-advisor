@@ -1,246 +1,598 @@
 @import "tailwindcss";
 
-/* ──────────────────────────────────────────────────────
-   BOTANICAL LUXE DESIGN SYSTEM
-   A premium wellness aesthetic: deep emerald & sage greens,
-   warm amber accents, soft cream canvas, glassmorphic surfaces.
-   ────────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════
+   FEDRIGHT DESIGN SYSTEM — Dark Mode First
+   Premium dark UI: near-black backgrounds, brand green (#1B8B4D)
+   from the FedRight v2 logo, amber accent from v1 logo.
+   Glassmorphism surfaces, Inter typography, fluid animations.
 
+   CRITICAL (Tailwind v4): ALL custom CSS must be inside @layer base
+   or @layer components. Unlayered CSS silently overrides ALL Tailwind
+   utilities due to CSS cascade layer precedence.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ─────────────────────────────────────────────────────────────
+   LAYER: BASE — Design tokens, resets, element defaults
+   ───────────────────────────────────────────────────────────── */
 @layer base {
+
+  /* ── Design Tokens ─────────────────────────────────────────── */
   :root {
-    /* ── Core palette ── */
-    --color-emerald-deep: #1a3a2a;
-    --color-emerald: #2d5a3f;
-    --color-emerald-light: #3d7a56;
-    --color-sage: #7fa88a;
-    --color-sage-light: #a8c5b0;
-    --color-sage-mist: #d4e4d8;
 
-    --color-amber: #d4940a;
-    --color-amber-warm: #e6a817;
-    --color-amber-glow: #f0c14b;
-    --color-amber-light: #fef3d0;
+    /* Background hierarchy
+       Lower number = darker = further back in z-stack
+       Rule: as z-elevation increases, background lightens          */
+    --bg-primary:           #0B0D0F;
+    --bg-secondary:         #12151A;
+    --bg-tertiary:          #1A1E26;
+    --bg-hover:             #222833;
+    --bg-input:             #0F1218;
 
-    --color-cream: #faf8f4;
-    --color-cream-warm: #f5f0e8;
-    --color-ivory: #fdfcf9;
+    /* Brand Green — extracted from FedRight v2 logo icon           */
+    --brand-green:          #1B8B4D;
+    --brand-green-light:    #2AAF65;
+    --brand-green-dark:     #146B3A;
+    --brand-green-glow:     rgba(27, 139, 77, 0.20);
+    --brand-green-subtle:   rgba(27, 139, 77, 0.08);
+    --brand-green-border:   rgba(27, 139, 77, 0.25);
 
-    --color-clay: #4a3f35;
-    --color-clay-light: #6b5d50;
-    --color-clay-muted: #8a7d72;
-    --color-clay-subtle: #c4bbb2;
+    /* Brand Amber — secondary accent from v1 logo's fork color
+       Use sparingly: warnings, streaks, premium indicators         */
+    --brand-amber:          #E6920A;
+    --brand-amber-light:    #F0A830;
+    --brand-amber-glow:     rgba(230, 146, 10, 0.20);
+    --brand-amber-subtle:   rgba(230, 146, 10, 0.08);
 
-    --color-coral: #d45a3a;
-    --color-coral-light: #e87960;
-    --color-coral-bg: #fef0ec;
+    /* Text hierarchy
+       primary   → headings, critical content  (high contrast)
+       secondary → body text, descriptions     (medium contrast)
+       muted     → captions, disabled, helpers (decorative only)
+       inverse   → text on green/light buttons                      */
+    --text-primary:         #F0F2F5;
+    --text-secondary:       #9BA3B0;
+    --text-muted:           #5C6370;
+    --text-inverse:         #0B0D0F;
 
-    --color-teal-soft: #2a8a7a;
+    /* Glassmorphism surfaces — transparent whites layered on dark bg
+       Always pair with backdrop-filter: blur() for visual effect   */
+    --surface-glass:        rgba(255, 255, 255, 0.03);
+    --surface-glass-hover:  rgba(255, 255, 255, 0.06);
+    --surface-border:       rgba(255, 255, 255, 0.06);
+    --surface-border-hover: rgba(255, 255, 255, 0.10);
+    --surface-elevated:     rgba(255, 255, 255, 0.04);
 
-    /* ── Surface & glass tokens ── */
-    --surface-primary: rgba(255, 255, 253, 0.72);
-    --surface-primary-solid: #fffffb;
-    --surface-elevated: rgba(255, 255, 253, 0.85);
-    --surface-glass: rgba(255, 255, 253, 0.55);
-    --surface-glass-border: rgba(45, 90, 63, 0.10);
-    --glass-blur: 20px;
-    --glass-saturate: 1.6;
+    /* Semantic status colors — always use tokens, never raw hex
+       Each has a paired -bg variant for banner/badge backgrounds   */
+    --color-success:        #2AAF65;
+    --color-success-bg:     rgba(42, 175, 101, 0.10);
+    --color-warning:        #F0A830;
+    --color-warning-bg:     rgba(240, 168, 48, 0.10);
+    --color-error:          #E5534B;
+    --color-error-bg:       rgba(229, 83, 75, 0.10);
+    --color-info:           #539BF5;
+    --color-info-bg:        rgba(83, 155, 245, 0.10);
 
-    /* ── Shadows ── */
-    --shadow-sm: 0 1px 3px rgba(26, 58, 42, 0.06), 0 1px 2px rgba(26, 58, 42, 0.04);
-    --shadow-md: 0 4px 12px rgba(26, 58, 42, 0.08), 0 2px 4px rgba(26, 58, 42, 0.04);
-    --shadow-lg: 0 12px 32px rgba(26, 58, 42, 0.10), 0 4px 8px rgba(26, 58, 42, 0.05);
-    --shadow-xl: 0 20px 48px rgba(26, 58, 42, 0.12), 0 8px 16px rgba(26, 58, 42, 0.06);
-    --shadow-glow-amber: 0 0 20px rgba(212, 148, 10, 0.25), 0 0 40px rgba(212, 148, 10, 0.10);
-    --shadow-glow-emerald: 0 0 20px rgba(45, 90, 63, 0.20), 0 0 40px rgba(45, 90, 63, 0.08);
+    /* Accent colors — purple (repeat badge), indigo (kid share), emerald (cook multiplier)
+       Each color has three variants: solid, subtle (0.15 α), and muted (0.25 α).
+       Centralised here so components never need raw rgba() calls.    */
+    --color-purple:         rgba(139, 92, 246, 1);
+    --color-purple-subtle:  rgba(139, 92, 246, 0.15);
+    --color-purple-muted:   rgba(139, 92, 246, 0.25);
+    --color-indigo:         rgba(99, 102, 241, 1);
+    --color-indigo-subtle:  rgba(99, 102, 241, 0.15);
+    --color-indigo-muted:   rgba(99, 102, 241, 0.25);
+    --color-emerald:        rgba(16, 185, 129, 1);
+    --color-emerald-subtle: rgba(16, 185, 129, 0.15);
 
-    /* ── Radii ── */
-    --radius-sm: 8px;
-    --radius-md: 12px;
-    --radius-lg: 16px;
-    --radius-xl: 20px;
-    --radius-2xl: 24px;
-    --radius-full: 9999px;
+    /* Shadows — pure black with opacity, works on any bg color
+       glow variants add colored bloom for green/amber elements      */
+    --shadow-sm:            0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+    --shadow-md:            0 4px 12px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
+    --shadow-lg:            0 12px 32px rgba(0, 0, 0, 0.5), 0 4px 8px rgba(0, 0, 0, 0.3);
+    --shadow-xl:            0 20px 48px rgba(0, 0, 0, 0.6), 0 8px 16px rgba(0, 0, 0, 0.4);
+    --shadow-glow-green:    0 0 20px var(--brand-green-glow), 0 0 40px rgba(27, 139, 77, 0.10);
+    --shadow-glow-amber:    0 0 20px var(--brand-amber-glow), 0 0 40px rgba(230, 146, 10, 0.10);
 
-    /* ── Transitions ── */
-    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
-    --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
-    --duration-fast: 150ms;
-    --duration-normal: 250ms;
-    --duration-slow: 400ms;
-    --duration-glacial: 600ms;
+    /* Border radii — generous rounding for premium dark UI feel    */
+    --radius-sm:            8px;
+    --radius-md:            12px;
+    --radius-lg:            16px;
+    --radius-xl:            20px;
+    --radius-2xl:           24px;
+    --radius-full:          9999px;
+
+    /* Transitions & Easing
+       ease-out-expo  → default, snappy settle (most UI transitions)
+       ease-out-back  → springy overshoot (delight moments)
+       ease-spring    → strong spring (prominent reveals)            */
+    --ease-out-expo:        cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-out-back:        cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-spring:          cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    --duration-fast:        150ms;
+    --duration-normal:      250ms;
+    --duration-slow:        400ms;
+    --duration-glacial:     600ms;
+
+    /* Glass blur — consistent backdrop-filter values               */
+    --glass-blur:           16px;
+    --glass-blur-heavy:     24px;
+    --glass-saturate:       1.4;
   }
 
+  /* ── HTML root ─────────────────────────────────────────────── */
   html {
+    /* Subpixel antialiasing produces correct results on dark
+       backgrounds with Inter font on both macOS and Windows        */
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* optimizeLegibility enables kerning pairs and ligatures
+       in Inter, which significantly improves heading quality       */
+    text-rendering: optimizeLegibility;
     scroll-behavior: smooth;
+    /* Prevent layout shift from scrollbar appearing/disappearing   */
+    scrollbar-gutter: stable;
   }
 
+  /* ── Body ──────────────────────────────────────────────────── */
   body {
-    color: var(--color-clay);
-    background-color: var(--color-cream);
+    color: var(--text-secondary);
+    background-color: var(--bg-primary);
+    font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+    /* Subtle gradient mesh: green top-left, amber bottom-right,
+       gives depth without distracting from content.
+       background-attachment: fixed means it doesn't scroll with page.
+       Critical: do not increase opacity above listed values —
+       higher values make the surface busy and reduce contrast.      */
     background-image:
-      radial-gradient(ellipse 80% 50% at 20% 0%, rgba(45, 90, 63, 0.04), transparent),
-      radial-gradient(ellipse 60% 40% at 80% 100%, rgba(212, 148, 10, 0.03), transparent),
-      radial-gradient(ellipse 50% 60% at 50% 50%, rgba(127, 168, 138, 0.02), transparent);
+      radial-gradient(ellipse 70% 50% at 15% 0%,  rgba(27, 139, 77, 0.06),  transparent),
+      radial-gradient(ellipse 50% 40% at 85% 100%, rgba(230, 146, 10, 0.04), transparent),
+      radial-gradient(ellipse 40% 60% at 50% 50%,  rgba(83, 155, 245, 0.02), transparent);
     background-attachment: fixed;
   }
 
-  /* ── Selection ── */
+  /* ── Text selection ─────────────────────────────────────────── */
   ::selection {
-    background-color: rgba(45, 90, 63, 0.15);
-    color: var(--color-emerald-deep);
+    /* Brand green selection tint with dark text for readability    */
+    background-color: var(--brand-green-subtle);
+    color: var(--text-primary);
   }
 
-  /* ── Scrollbar ── */
+  /* ── Scrollbar (WebKit/Blink) ────────────────────────────────
+     Mozilla Firefox uses scrollbar-color and scrollbar-width
+     which must be set separately if Firefox support is needed.    */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
   }
 
   ::-webkit-scrollbar-track {
+    /* Transparent track blends into the dark background           */
     background: transparent;
   }
 
   ::-webkit-scrollbar-thumb {
-    background: var(--color-sage-light);
+    /* Subtle scrollbar thumb — visible but not distracting        */
+    background: rgba(255, 255, 255, 0.12);
     border-radius: var(--radius-full);
+    transition: background var(--duration-fast) var(--ease-out-expo);
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--color-sage);
+    background: rgba(255, 255, 255, 0.22);
   }
 
-  /* ── Focus ── */
+  /* Firefox scrollbar */
+  * {
+    scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+    scrollbar-width: thin;
+  }
+
+  /* ── Focus visibility ────────────────────────────────────────
+     Critical for keyboard accessibility. Uses brand green to
+     maintain visual consistency with the interactive color.       */
   :focus-visible {
-    outline: 2px solid var(--color-emerald);
+    outline: 2px solid var(--brand-green);
     outline-offset: 2px;
     border-radius: 2px;
   }
 
-  /* ── Headings ── */
+  /* ── Heading defaults ─────────────────────────────────────────
+     Headings default to primary text color and tight tracking.
+     Font-family explicitly set to Inter (inherits from body but
+     this guards against any accidental override).
+     NOTE: Visual scale is NOT applied here — use .type-* utility
+     classes for size. Semantic HTML ≠ visual hierarchy.           */
   h1, h2, h3, h4, h5, h6 {
-    font-family: var(--font-display), serif;
-    color: var(--color-emerald-deep);
+    font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: var(--text-primary);
     letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+
+  /* ── Anchor defaults ──────────────────────────────────────── */
+  a {
+    color: var(--brand-green-light);
+    text-decoration: none;
+    transition: color var(--duration-fast) var(--ease-out-expo);
+  }
+
+  a:hover {
+    color: var(--brand-green);
+  }
+
+  /* ── Type scale utility classes ───────────────────────────────
+     Apply these classes explicitly rather than relying on h1-h6
+     element defaults. Keeps semantic markup decoupled from visual. */
+  .type-display {
+    font-size: 3.5rem;       /* 56px */
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+  }
+
+  .type-h2 {
+    font-size: 2.5rem;       /* 40px */
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+
+  .type-h3 {
+    font-size: 1.75rem;      /* 28px */
+    font-weight: 700;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+  }
+
+  .type-h4 {
+    font-size: 1.25rem;      /* 20px */
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: -0.01em;
+  }
+
+  .type-body-lg {
+    font-size: 1.125rem;     /* 18px */
+    font-weight: 400;
+    line-height: 1.7;
+    letter-spacing: 0;
+  }
+
+  .type-body {
+    font-size: 1rem;         /* 16px */
+    font-weight: 400;
+    line-height: 1.6;
+    letter-spacing: 0;
+  }
+
+  .type-body-sm {
+    font-size: 0.875rem;     /* 14px */
+    font-weight: 400;
+    line-height: 1.5;
+    letter-spacing: 0;
+  }
+
+  .type-caption {
+    font-size: 0.75rem;      /* 12px */
+    font-weight: 500;
+    line-height: 1.4;
+    letter-spacing: 0.02em;
+  }
+
+  .type-overline {
+    font-size: 0.6875rem;    /* 11px */
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  /* ── Reduced Motion Safety Net ────────────────────────────────
+     Global override for users who have enabled "Reduce motion" in
+     their OS accessibility settings (prefers-reduced-motion: reduce).
+     This safety net ensures that ANY animation or transition in the
+     entire document — including third-party components and inline
+     styles — is collapsed to near-instantaneous durations.
+     The !important flag is necessary to override inline styles and
+     any other specificity that may exist on individual elements.
+     This block is intentionally broad and blunt: it is a last-resort
+     accessibility guarantee, complementing the component-level checks
+     (useReducedMotion) which gate motion more gracefully.             */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+    html { scroll-behavior: auto; }
   }
 }
 
+
+/* ─────────────────────────────────────────────────────────────
+   LAYER: COMPONENTS — Reusable UI patterns, animations, surfaces
+   ───────────────────────────────────────────────────────────── */
 @layer components {
-  /* ── Animations ── */
+
+  /* ────────────────────────────────────────────────────────────
+     ANIMATION UTILITY CLASSES
+     Each class applies a pre-defined keyframe animation.
+     Duration and easing are baked in per the spec. Override via
+     inline style only if a specific instance needs adjustment.
+     ──────────────────────────────────────────────────────────── */
+
+  /* Slide Down — for dropdown menus, notification banners, drawers
+     that enter from above the viewport                             */
   .animate-slide-down {
-    animation: slideDown 0.35s var(--ease-out-expo);
+    animation: slideDown var(--duration-normal) var(--ease-out-expo) both;
   }
 
+  /* Slide Up — for bottom sheets, toast notifications, elements
+     that enter from below                                          */
   .animate-slide-up {
-    animation: slideUp 0.4s var(--ease-out-expo);
+    animation: slideUp var(--duration-slow) var(--ease-out-expo) both;
   }
 
+  /* Fade In — for content that appears without directional motion:
+     page content on load, lazy-loaded images                       */
   .animate-fade-in {
-    animation: fadeIn 0.5s var(--ease-out-expo);
+    animation: fadeIn var(--duration-slow) var(--ease-out-expo) both;
   }
 
+  /* Scale In — for modals, popovers, cards that pop into existence.
+     Uses ease-out-back for the springy overshoot effect.           */
   .animate-scale-in {
-    animation: scaleIn 0.35s var(--ease-out-back);
+    animation: scaleIn var(--duration-normal) var(--ease-out-back) both;
   }
 
+  /* Shimmer — for skeleton loading states. Apply to the skeleton
+     container along with the shimmer background gradient.          */
   .animate-shimmer {
     animation: shimmer 2s ease-in-out infinite;
     background-size: 200% 100%;
+    /* The background gradient must be applied separately:
+       background: linear-gradient(
+         90deg,
+         var(--bg-secondary) 0%,
+         var(--bg-hover) 50%,
+         var(--bg-secondary) 100%
+       );                                                          */
   }
 
+  /* Glow Pulse — for active indicators, processing states, elements
+     that need to communicate "live" or "active" status             */
   .animate-glow-pulse {
     animation: glowPulse 2.5s ease-in-out infinite;
   }
 
+  /* Float — for decorative background elements, illustration
+     accents, empty state illustrations. Use sparingly.             */
   .animate-float {
     animation: float 6s ease-in-out infinite;
   }
 
-  /* ── Stagger delays for orchestrated reveals ── */
+  /* Marquee — for scrolling text tickers, announcement banners.
+     Container must have overflow: hidden.                          */
+  .animate-marquee {
+    animation: marquee 20s linear infinite;
+  }
+
+  /* Gradient Mesh — for the animated background gradient on hero
+     sections or premium feature cards. CPU-intensive; use once per
+     screen maximum.                                                 */
+  .animate-gradient-mesh {
+    animation: gradientMesh var(--duration-glacial) ease-in-out infinite alternate;
+    background-size: 200% 200%;
+  }
+
+  /* Particle Float — for decorative floating dot/sparkle elements.
+     Each particle instance should have a different delay via stagger. */
+  .animate-particle-float {
+    animation: particleFloat 8s ease-in-out infinite;
+  }
+
+  /* ── Stagger delay classes ────────────────────────────────────
+     Apply to sibling elements to create orchestrated list reveals.
+     Parent must trigger each child's animation.
+     Usage: <li class="animate-fade-in stagger-2">...</li>
+     animation-fill-mode: backwards keeps the element invisible
+     until the animation begins (prevents flash of content).        */
   .stagger-1 { animation-delay: 0.05s; animation-fill-mode: backwards; }
   .stagger-2 { animation-delay: 0.10s; animation-fill-mode: backwards; }
   .stagger-3 { animation-delay: 0.15s; animation-fill-mode: backwards; }
   .stagger-4 { animation-delay: 0.20s; animation-fill-mode: backwards; }
   .stagger-5 { animation-delay: 0.25s; animation-fill-mode: backwards; }
   .stagger-6 { animation-delay: 0.30s; animation-fill-mode: backwards; }
+  .stagger-7 { animation-delay: 0.35s; animation-fill-mode: backwards; }
+  .stagger-8 { animation-delay: 0.40s; animation-fill-mode: backwards; }
 
-  /* ── Glass surface ── */
+  /* ────────────────────────────────────────────────────────────
+     GLASSMORPHISM SURFACES
+     Always pair with a dark background — glass is invisible on
+     light surfaces. backdrop-filter is the key property.
+     -webkit-backdrop-filter required for Safari/iOS support.
+     ──────────────────────────────────────────────────────────── */
+
+  /* Standard glass — cards, panels, nav containers                  */
   .glass-surface {
-    background: var(--surface-primary);
+    background: var(--surface-glass);
     backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
     -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-    border: 1px solid var(--surface-glass-border);
-    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--shadow-md);
+    transition:
+      background var(--duration-normal) var(--ease-out-expo),
+      border-color var(--duration-normal) var(--ease-out-expo),
+      box-shadow var(--duration-normal) var(--ease-out-expo);
   }
 
+  .glass-surface:hover {
+    background: var(--surface-glass-hover);
+    border-color: var(--surface-border-hover);
+    box-shadow: var(--shadow-lg);
+  }
+
+  /* Elevated glass — modals, dropdowns, command palettes.
+     Heavier blur creates stronger depth separation.                 */
   .glass-surface-elevated {
     background: var(--surface-elevated);
-    backdrop-filter: blur(24px) saturate(1.8);
-    -webkit-backdrop-filter: blur(24px) saturate(1.8);
-    border: 1px solid rgba(45, 90, 63, 0.08);
-    box-shadow: var(--shadow-md);
+    backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--shadow-xl);
   }
 
-  /* ── Gradient accents ── */
-  .gradient-emerald {
-    background: linear-gradient(135deg, var(--color-emerald-deep) 0%, var(--color-emerald) 50%, var(--color-emerald-light) 100%);
+  /* Green-tinted glass — for selected/active state cards           */
+  .glass-surface-green {
+    background: var(--brand-green-subtle);
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    border: 1px solid var(--brand-green-border);
+    box-shadow: var(--shadow-md), 0 0 12px var(--brand-green-glow);
   }
 
+  /* ────────────────────────────────────────────────────────────
+     GRADIENT UTILITIES
+     Named by color family, not semantic meaning.
+     ──────────────────────────────────────────────────────────── */
+
+  /* Brand green gradient — primary CTA backgrounds, active badges  */
+  .gradient-green {
+    background: linear-gradient(
+      135deg,
+      var(--brand-green-dark) 0%,
+      var(--brand-green) 50%,
+      var(--brand-green-light) 100%
+    );
+  }
+
+  /* Amber gradient — warning banners, streak highlights            */
   .gradient-amber {
-    background: linear-gradient(135deg, var(--color-amber) 0%, var(--color-amber-warm) 50%, var(--color-amber-glow) 100%);
+    background: linear-gradient(
+      135deg,
+      var(--brand-amber) 0%,
+      var(--brand-amber-light) 100%
+    );
   }
 
-  .gradient-botanical {
-    background: linear-gradient(145deg, var(--color-emerald-deep) 0%, var(--color-emerald) 40%, var(--color-teal-soft) 100%);
+  /* Dark gradient — hero sections, premium feature headers         */
+  .gradient-dark {
+    background: linear-gradient(
+      145deg,
+      var(--bg-tertiary) 0%,
+      var(--bg-secondary) 60%,
+      rgba(27, 139, 77, 0.05) 100%
+    );
   }
 
-  .gradient-warm {
-    background: linear-gradient(135deg, var(--color-amber) 0%, var(--color-coral) 100%);
+  /* Mesh gradient — animated background for landing/hero sections  */
+  .gradient-mesh {
+    background:
+      radial-gradient(ellipse 80% 60% at 20% 20%, rgba(27, 139, 77, 0.12), transparent 60%),
+      radial-gradient(ellipse 60% 80% at 80% 80%, rgba(83, 155, 245, 0.08), transparent 60%),
+      radial-gradient(ellipse 50% 50% at 50% 50%, rgba(230, 146, 10, 0.06), transparent 70%),
+      var(--bg-primary);
   }
 
-  /* ── Text gradients ── */
-  .text-gradient-emerald {
-    background: linear-gradient(135deg, var(--color-emerald-deep), var(--color-emerald-light));
+  /* ── Text gradient utilities ──────────────────────────────────
+     background-clip: text with transparent fill creates gradient
+     text. The parent element must NOT have overflow: hidden or
+     the gradient text will be clipped.                             */
+  .text-gradient-green {
+    background: linear-gradient(
+      135deg,
+      var(--brand-green-light),
+      var(--brand-green)
+    );
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
 
   .text-gradient-amber {
-    background: linear-gradient(135deg, var(--color-amber), var(--color-amber-warm));
+    background: linear-gradient(
+      135deg,
+      var(--brand-amber),
+      var(--brand-amber-light)
+    );
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
 
-  /* ── Decorative line ── */
+  /* Multicolor hero gradient text                                  */
+  .text-gradient-hero {
+    background: linear-gradient(
+      135deg,
+      var(--text-primary) 0%,
+      var(--brand-green-light) 50%,
+      var(--brand-amber-light) 100%
+    );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* ── Accent line ──────────────────────────────────────────────
+     Horizontal rule / decorative separator with gradient fade.    */
   .accent-line {
-    height: 3px;
-    background: linear-gradient(90deg, var(--color-amber), var(--color-amber-warm), transparent);
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--surface-border) 20%,
+      var(--surface-border) 80%,
+      transparent
+    );
+  }
+
+  .accent-line-green {
+    height: 2px;
+    background: linear-gradient(
+      90deg,
+      var(--brand-green),
+      var(--brand-green-light),
+      transparent
+    );
     border-radius: var(--radius-full);
   }
 
-  /* ── Custom checkbox styling ── */
-  .checkbox-botanical {
+  /* ────────────────────────────────────────────────────────────
+     CUSTOM CHECKBOX
+     Replaces .checkbox-botanical from the old Botanical theme.
+     ──────────────────────────────────────────────────────────── */
+  .checkbox-fedright {
     appearance: none;
+    -webkit-appearance: none;
     width: 18px;
     height: 18px;
-    border: 2px solid var(--color-sage-light);
+    border: 2px solid var(--surface-border-hover);
     border-radius: 5px;
-    background: white;
+    background: var(--bg-input);
     cursor: pointer;
     position: relative;
-    transition: all var(--duration-fast) var(--ease-out-expo);
     flex-shrink: 0;
+    transition:
+      background var(--duration-fast) var(--ease-out-expo),
+      border-color var(--duration-fast) var(--ease-out-expo),
+      box-shadow var(--duration-fast) var(--ease-out-expo);
   }
 
-  .checkbox-botanical:checked {
-    background: linear-gradient(135deg, var(--color-emerald), var(--color-emerald-light));
-    border-color: var(--color-emerald);
+  .checkbox-fedright:checked {
+    /* Green gradient fill when checked                             */
+    background: linear-gradient(
+      135deg,
+      var(--brand-green),
+      var(--brand-green-light)
+    );
+    border-color: var(--brand-green);
+    box-shadow: 0 0 0 0px var(--brand-green-glow);
   }
 
-  .checkbox-botanical:checked::after {
+  /* Checkmark via CSS — white rotated rectangle                    */
+  .checkbox-fedright:checked::after {
     content: '';
     position: absolute;
     top: 2px;
@@ -253,28 +605,170 @@
     transform: rotate(45deg);
   }
 
-  .checkbox-botanical:hover {
-    border-color: var(--color-emerald);
-    box-shadow: 0 0 0 3px rgba(45, 90, 63, 0.08);
+  .checkbox-fedright:hover {
+    border-color: var(--brand-green);
+    box-shadow: 0 0 0 3px var(--brand-green-subtle);
   }
 
-  .checkbox-botanical:focus-visible {
-    outline: 2px solid var(--color-emerald);
+  .checkbox-fedright:focus-visible {
+    outline: 2px solid var(--brand-green);
     outline-offset: 2px;
+    box-shadow: 0 0 0 4px var(--brand-green-subtle);
   }
 
-  /* ── Organic noise texture overlay ── */
+  /* ────────────────────────────────────────────────────────────
+     NOISE TEXTURE OVERLAY
+     Subtle organic grain applied via an inline SVG turbulence
+     filter. Adds tactile quality to flat dark surfaces.
+     The ::before pseudo-element must not capture pointer events.
+     Parent must be position: relative.
+     ──────────────────────────────────────────────────────────── */
+  .texture-overlay {
+    position: relative;
+  }
+
   .texture-overlay::before {
     content: '';
     position: absolute;
     inset: 0;
-    opacity: 0.015;
+    /* opacity 0.018 is the maximum that adds texture without
+       visible grain on standard displays                           */
+    opacity: 0.018;
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
     pointer-events: none;
     border-radius: inherit;
+    z-index: 0;
+  }
+
+  /* ────────────────────────────────────────────────────────────
+     SKELETON LOADING PATTERN
+     Standard implementation for skeleton/shimmer loading states.
+     ──────────────────────────────────────────────────────────── */
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--bg-secondary) 0%,
+      var(--bg-hover) 50%,
+      var(--bg-secondary) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s ease-in-out infinite;
+    border-radius: var(--radius-sm);
+  }
+
+  /* ────────────────────────────────────────────────────────────
+     BADGE VARIANTS
+     Semantic status badges. Apply role-specific class to
+     a <span> element with base classes: type-caption, px-2, py-1
+     ──────────────────────────────────────────────────────────── */
+  .badge-success {
+    background: var(--color-success-bg);
+    color: var(--color-success);
+    border: 1px solid rgba(42, 175, 101, 0.20);
+    border-radius: var(--radius-full);
+  }
+
+  .badge-warning {
+    background: var(--color-warning-bg);
+    color: var(--color-warning);
+    border: 1px solid rgba(240, 168, 48, 0.20);
+    border-radius: var(--radius-full);
+  }
+
+  .badge-error {
+    background: var(--color-error-bg);
+    color: var(--color-error);
+    border: 1px solid rgba(229, 83, 75, 0.20);
+    border-radius: var(--radius-full);
+  }
+
+  .badge-info {
+    background: var(--color-info-bg);
+    color: var(--color-info);
+    border: 1px solid rgba(83, 155, 245, 0.20);
+    border-radius: var(--radius-full);
+  }
+
+  .badge-neutral {
+    background: var(--surface-glass);
+    color: var(--text-secondary);
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-full);
+  }
+
+  /* ────────────────────────────────────────────────────────────
+     LANDING PAGE — MARQUEE ANIMATIONS
+     Two-direction infinite scroll for cuisine cards & badges.
+     The content array is doubled so -50% = one full set width,
+     creating a seamless loop without any visible gap.
+     pause on hover/focus via group-hover/group-focus-within.
+     ──────────────────────────────────────────────────────────── */
+  .animate-marquee-left {
+    animation: marquee-left 40s linear infinite;
+  }
+
+  .animate-marquee-right {
+    animation: marquee-right 40s linear infinite;
+  }
+
+  /* ────────────────────────────────────────────────────────────
+     LANDING PAGE — GRADIENT MESH ANIMATION (CTA section)
+     Used exclusively by the FinalCTA section background.
+     Renamed from .animate-gradient-mesh to .animate-gradient-mesh-cta
+     to avoid colliding with the design-system .animate-gradient-mesh
+     class above (which uses the gradientMesh keyframe with 200% size).
+     background-size: 400% 400% is required for the wider gradient
+     position shift used in the slower 15s CTA animation.
+     ──────────────────────────────────────────────────────────── */
+  .animate-gradient-mesh-cta {
+    background: linear-gradient(
+      135deg,
+      rgba(27,139,77,0.15)   0%,
+      rgba(230,146,10,0.10)  50%,
+      rgba(27,139,77,0.15)   100%
+    );
+    background-size: 400% 400%;
+    animation: gradient-mesh 15s ease infinite;
+  }
+
+  /* ────────────────────────────────────────────────────────────
+     TESTIMONIALS SWIPER — Custom pagination & navigation styles
+     Scoped to .testimonials-swiper to avoid polluting other
+     Swiper instances elsewhere in the app.
+     ──────────────────────────────────────────────────────────── */
+  .testimonials-swiper .swiper-pagination-bullet {
+    background: var(--text-muted);
+    opacity: 0.5;
+  }
+
+  .testimonials-swiper .swiper-pagination-bullet-active {
+    background: var(--brand-green);
+    opacity: 1;
+  }
+
+  .testimonials-swiper .swiper-button-prev,
+  .testimonials-swiper .swiper-button-next {
+    color: var(--text-muted);
+    --swiper-navigation-size: 20px;
+  }
+
+  .testimonials-swiper .swiper-button-prev:hover,
+  .testimonials-swiper .swiper-button-next:hover {
+    color: var(--text-primary);
   }
 }
 
+
+/* ─────────────────────────────────────────────────────────────
+   KEYFRAMES — Intentionally outside @layer
+
+   CSS @keyframes are not subject to cascade layer specificity
+   and are safe outside layers. However, the animation classes
+   that reference these keyframes must still be inside @layer
+   components (see above).
+   ───────────────────────────────────────────────────────────── */
+
+/* Elements entering from above (dropdowns, notification bars)     */
 @keyframes slideDown {
   from {
     opacity: 0;
@@ -286,6 +780,7 @@
   }
 }
 
+/* Elements entering from below (bottom sheets, toasts)            */
 @keyframes slideUp {
   from {
     opacity: 0;
@@ -297,15 +792,13 @@
   }
 }
 
+/* Simple opacity transition — no transform, no layout shift       */
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
+/* Scale-in for modals, popovers — slight overshoot via ease-out-back */
 @keyframes scaleIn {
   from {
     opacity: 0;
@@ -317,29 +810,63 @@
   }
 }
 
+/* Skeleton shimmer — horizontal light sweep                        */
 @keyframes shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
+/* Breathing opacity for "live" indicators, processing states       */
 @keyframes glowPulse {
-  0%, 100% {
-    opacity: 0.6;
-  }
-  50% {
-    opacity: 1;
-  }
+  0%, 100% { opacity: 0.5; }
+  50%       { opacity: 1; }
 }
 
+/* Gentle vertical float for decorative elements, illustrations     */
 @keyframes float {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-6px);
-  }
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-8px); }
+}
+
+/* Horizontal marquee for scrolling tickers
+   Container must be: overflow: hidden; white-space: nowrap;        */
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+/* Background gradient position animation
+   Use with background-size: 200% 200%                              */
+@keyframes gradientMesh {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Floating sparkle/particle for decorative hero elements           */
+@keyframes particleFloat {
+  0%   { transform: translateY(0) translateX(0) scale(1); opacity: 0.6; }
+  25%  { transform: translateY(-12px) translateX(6px) scale(1.05); opacity: 1; }
+  50%  { transform: translateY(-8px) translateX(-4px) scale(0.95); opacity: 0.8; }
+  75%  { transform: translateY(-16px) translateX(8px) scale(1.02); opacity: 1; }
+  100% { transform: translateY(0) translateX(0) scale(1); opacity: 0.6; }
+}
+
+/* Landing page marquee — left direction (cuisine cards strip)       */
+@keyframes marquee-left {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+/* Landing page marquee — right direction (cuisine badges strip)     */
+@keyframes marquee-right {
+  from { transform: translateX(-50%); }
+  to   { transform: translateX(0); }
+}
+
+/* Landing page FinalCTA animated gradient mesh background           */
+@keyframes gradient-mesh {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from collections import defaultdict
 
 from database import get_db
+from models.user import User
 from models.grocery import GroceryItem
 from models.meal_plan import WeeklyPlan, DailyPlan, Meal
 from models.profile import UserProfile
@@ -26,6 +27,17 @@ from schemas.grocery import (
 from services.grocery_service import generate_grocery_list, regenerate_grocery_list, toggle_grocery_item
 from services.export_service import generate_grocery_excel
 from services.ai_meal_planner import AIMealPlanner
+from auth import get_current_user
+
+
+def _verify_plan_ownership(db: Session, plan_id: int, user: User) -> WeeklyPlan:
+    plan = db.query(WeeklyPlan).filter(WeeklyPlan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Weekly plan with id {plan_id} not found")
+    profile = db.query(UserProfile).filter(UserProfile.id == plan.profile_id).first()
+    if not profile or profile.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Weekly plan with id {plan_id} not found")
+    return plan
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +48,8 @@ router = APIRouter(prefix="/grocery", tags=["Grocery"])
 @router.get("/{plan_id}", response_model=GroceryListResponse, status_code=status.HTTP_200_OK)
 def get_grocery_list(
     plan_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Get the grocery list for a weekly meal plan.
@@ -54,6 +67,8 @@ def get_grocery_list(
     Raises:
         HTTPException 404: If grocery list not found for this plan
     """
+    _verify_plan_ownership(db, plan_id, current_user)
+
     # Get all grocery items for this plan
     grocery_items = db.query(GroceryItem).filter(
         GroceryItem.weekly_plan_id == plan_id
@@ -97,7 +112,8 @@ def get_grocery_list(
 @router.post("/{plan_id}/generate", response_model=RegenerateGroceryListResponse, status_code=status.HTTP_201_CREATED)
 async def generate_grocery_list_endpoint(
     plan_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Generate or regenerate grocery list for a weekly meal plan.
@@ -116,6 +132,8 @@ async def generate_grocery_list_endpoint(
     Raises:
         HTTPException 404: If weekly plan not found
     """
+    _verify_plan_ownership(db, plan_id, current_user)
+
     try:
         # First: auto-generate recipes for meals missing ingredients
         await _ensure_all_recipes(db, plan_id)
@@ -222,7 +240,8 @@ async def _ensure_all_recipes(db: Session, plan_id: int):
 @router.get("/{plan_id}/export-excel", status_code=status.HTTP_200_OK)
 def export_grocery_excel(
     plan_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Export grocery list to Excel file.
@@ -234,6 +253,8 @@ def export_grocery_excel(
     Returns:
         StreamingResponse: Excel file download
     """
+    _verify_plan_ownership(db, plan_id, current_user)
+
     try:
         excel_buffer = generate_grocery_excel(db, plan_id)
         return StreamingResponse(
@@ -254,7 +275,8 @@ def export_grocery_excel(
 def toggle_grocery_item_endpoint(
     item_id: int,
     toggle_request: ToggleGroceryItemRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Toggle the checked status of a grocery item.
