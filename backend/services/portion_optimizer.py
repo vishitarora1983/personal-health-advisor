@@ -67,6 +67,13 @@ MEAL_CALORIE_DISTRIBUTION: Dict[str, float] = {
     "snack":     0.10,
 }
 
+# Hard calorie tolerance band (±15% of per-meal calorie target).
+# When medical constraints (e.g., high-protein floor) conflict with soft calorie
+# balance, the LP used to sacrifice calories entirely. With hard bounds the LP
+# goes infeasible instead, triggering the supplement recovery path which adds a
+# targeted side dish to close the gap.
+CAL_TOLERANCE: float = 0.15
+
 # Minimum units a member must take of any base component.
 # Set to 0.25 to prevent degenerate zero-portion solutions while still
 # allowing a very small allocation when a component is calorie-dense.
@@ -133,14 +140,16 @@ class PortionOptimizer:
         components: List[Dict],
         member_targets: List[Dict],
         meal_type: str,
+        meal_fraction: float = None,
+        _enforce_hard_cal: bool = True,
     ) -> PortionResult:
         """
         Run the LP and return allocations.
 
-        The LP is always constructed to be feasible via calorie deviation variables
-        (dev_plus / dev_minus). Infeasibility therefore only arises when a hard
-        medical constraint (e.g., a strict diabetes carb cap that the available
-        components cannot satisfy at all) makes the feasible region empty.
+        Hard calorie bounds (±CAL_TOLERANCE) prevent the LP from massively
+        overshooting calories to satisfy medical macro constraints. When the
+        hard bounds conflict with medical constraints, the LP goes infeasible
+        and the caller triggers the supplement recovery path.
 
         Args:
             components:     List of component dicts. Required keys per dict:
@@ -160,13 +169,20 @@ class PortionOptimizer:
                               medical_goals    (List[str])
             meal_type:      One of "breakfast", "lunch", "dinner", "snack".
                             Controls the calorie fraction via MEAL_CALORIE_DISTRIBUTION.
+            meal_fraction:  Pre-computed normalized fraction of daily calories for
+                            this meal. When None, falls back to the raw fraction
+                            from MEAL_CALORIE_DISTRIBUTION (no normalization).
+            _enforce_hard_cal: When True (default), adds hard ±CAL_TOLERANCE calorie
+                            bounds. Set to False for the diagnostic re-solve that
+                            computes the "natural" overshoot without calorie caps.
 
         Returns:
             PortionResult with feasible=True if CBC converged to an optimal solution,
             else feasible=False with a gap dict describing why the LP failed.
         """
-        # Validate meal_type; fall back to "dinner" fraction if unrecognised
-        meal_fraction = MEAL_CALORIE_DISTRIBUTION.get(meal_type, 0.30)
+        # Use caller-provided normalized fraction, or fall back to raw lookup
+        if meal_fraction is None:
+            meal_fraction = MEAL_CALORIE_DISTRIBUTION.get(meal_type, 0.30)
 
         # Convenience name lists
         member_names = [m["name"] for m in member_targets]
@@ -268,12 +284,22 @@ class PortionOptimizer:
                 for c_name in comp_names
             )
 
-            # 1. Calorie balance with deviation variables (always feasible)
+            # 1. Calorie balance with deviation variables (soft — fine-tunes within band)
             #    member_cal + dev_minus[m] - dev_plus[m] == meal_target_cal
             prob += (
                 member_cal + dev_minus[m_name] - dev_plus[m_name] == meal_target_cal,
                 f"CalBalance_{m_name}",
             )
+
+            # 1b. Hard calorie bounds — prevent massive overshoot when medical
+            #     constraints (e.g., protein floor) push calories way past target.
+            #     When _enforce_hard_cal is False (diagnostic re-solve), these are
+            #     omitted so we can observe the "natural" unconstrained solution.
+            if _enforce_hard_cal:
+                cal_ceiling = meal_target_cal * (1 + CAL_TOLERANCE)
+                cal_floor   = meal_target_cal * (1 - CAL_TOLERANCE)
+                prob += (member_cal <= cal_ceiling, f"CalCeiling_{m_name}")
+                prob += (member_cal >= cal_floor,   f"CalFloor_{m_name}")
 
             # 2. Medical constraint — diabetes_management: carbs ≤ 35% of meal calories
             #    (4 kcal/g for carbs)
@@ -366,9 +392,18 @@ class PortionOptimizer:
         if prob.status != pulp.constants.LpStatusOptimal:
             logger.warning(
                 f"[PortionOptimizer] LP did not converge (status={pulp.LpStatus[prob.status]}). "
-                f"Computing gap for supplement recovery."
+                f"{'Computing diagnostic gap' if _enforce_hard_cal else 'Relaxed LP also infeasible'}."
             )
-            gap = self._compute_gap(components, member_targets, meal_type)
+            # Only compute the diagnostic gap from the hard-bound LP.
+            # When _enforce_hard_cal is False this IS the relaxed re-solve —
+            # calling _compute_diagnostic_gap again would cause infinite recursion.
+            gap = (
+                self._compute_diagnostic_gap(
+                    components, member_targets, meal_type, meal_fraction
+                )
+                if _enforce_hard_cal
+                else {}  # Sentinel: _compute_diagnostic_gap handles this case
+            )
             return PortionResult(
                 feasible=False,
                 allocations={},
@@ -408,60 +443,165 @@ class PortionOptimizer:
     # Private helpers
     # -----------------------------------------------------------------------
 
-    def _compute_gap(
+    def _compute_diagnostic_gap(
         self,
         components: List[Dict],
         member_targets: List[Dict],
         meal_type: str,
+        meal_fraction: float = None,
     ) -> Dict[str, str]:
         """
-        Compute a human-readable gap description per member when the LP is infeasible.
+        Compute a rich diagnostic gap description per member when the hard-bound LP
+        is infeasible.
 
-        For each member, estimates the maximum achievable calories from the current
-        component set (capping each component at MAX_COMPONENT_UNITS) and compares
-        that ceiling to the per-meal calorie target. The result drives the supplement
-        prompt — the caller will ask the LLM to add components that close this gap.
+        Strategy: re-solve the LP *without* hard calorie bounds (_enforce_hard_cal=False)
+        to see where the "natural" unconstrained solution lands. Then compare each
+        member's actual nutrition from that relaxed solve to their per-meal targets
+        and produce an actionable description for the supplement prompt.
+
+        If the relaxed LP also fails (rare — means even medical constraints alone are
+        unsatisfiable with these components), falls back to a simple heuristic estimate.
 
         Args:
             components:     Component list for the meal.
             member_targets: Per-member target dicts.
             meal_type:      Controls the meal calorie fraction.
+            meal_fraction:  Pre-computed normalized fraction (or None for raw lookup).
 
         Returns:
-            Dict mapping member name to a gap description string, e.g.:
-            "needs 140 more cal with ≤5g additional carbs"
-            "10 kcal over target — no supplement needed"
+            Dict mapping member name to a rich gap description string, e.g.:
+            "Calories +977 surplus (1725 vs 748 target). Protein OK (56g vs 56g target). "
+            "Active goals: muscle_building, high_protein. "
+            "Recommendation: needs high-protein, low-calorie side dish (yogurt, sprouts, egg whites)"
         """
-        meal_fraction = MEAL_CALORIE_DISTRIBUTION.get(meal_type, 0.30)
+        if meal_fraction is None:
+            meal_fraction = MEAL_CALORIE_DISTRIBUTION.get(meal_type, 0.30)
 
-        # Maximum calories achievable if every component is taken at MAX_COMPONENT_UNITS
-        max_achievable_cal = sum(
-            MAX_COMPONENT_UNITS * c["cal_per_unit"] for c in components
+        # Re-solve without hard calorie bounds to observe the natural solution
+        relaxed = self.allocate(
+            components=components,
+            member_targets=member_targets,
+            meal_type=meal_type,
+            meal_fraction=meal_fraction,
+            _enforce_hard_cal=False,
         )
 
         gap: Dict[str, str] = {}
-        for m in member_targets:
-            m_name = m["name"]
-            target = m["target_calories"] * meal_fraction
-            shortfall_cal = target - max_achievable_cal
 
-            if shortfall_cal > 0:
-                # Member cannot hit their calorie target even at maximum portions.
+        if not relaxed.feasible:
+            # Even the relaxed LP failed — fall back to heuristic estimate
+            logger.warning(
+                "[PortionOptimizer] Relaxed LP also infeasible — using heuristic gap."
+            )
+            max_achievable_cal = sum(
+                MAX_COMPONENT_UNITS * c["cal_per_unit"] for c in components
+            )
+            for m in member_targets:
+                m_name = m["name"]
+                target_cal = m["target_calories"] * meal_fraction
                 goals = m.get("medical_goals", []) or []
-                if "diabetes_management" in goals:
-                    # Include carb budget hint to guide supplement selection
-                    carb_budget = round(target * 0.35 / 4)
+                goals_str = ", ".join(goals) if goals else "none"
+                shortfall = target_cal - max_achievable_cal
+                if shortfall > 0:
                     gap[m_name] = (
-                        f"needs {round(shortfall_cal)} more cal with "
-                        f"≤{carb_budget}g additional carbs"
+                        f"Calorie shortfall: needs {round(shortfall)} more kcal. "
+                        f"Active goals: {goals_str}. "
+                        f"Components cannot satisfy targets even at max portions."
                     )
                 else:
-                    gap[m_name] = f"needs {round(shortfall_cal)} more cal"
-            else:
-                # Components are sufficient (or over-sufficient); no supplement needed
-                gap[m_name] = (
-                    f"{round(abs(shortfall_cal))} kcal over target — no supplement needed"
+                    gap[m_name] = (
+                        f"Calories achievable but medical constraints conflict. "
+                        f"Active goals: {goals_str}."
+                    )
+            return gap
+
+        # Relaxed LP succeeded — compare actual vs target per member
+        for m in member_targets:
+            m_name = m["name"]
+            goals = m.get("medical_goals", []) or []
+            target_cal     = m["target_calories"] * meal_fraction
+            target_protein = m.get("target_protein", 0) * meal_fraction
+            target_carbs   = m.get("target_carbs", 0) * meal_fraction
+            target_fats    = m.get("target_fats", 0) * meal_fraction
+
+            actual = relaxed.per_member_nutrition.get(m_name, {})
+            actual_cal     = actual.get("calories", 0)
+            actual_protein = actual.get("protein", 0)
+            actual_carbs   = actual.get("carbs", 0)
+            actual_fats    = actual.get("fats", 0)
+
+            # Build delta descriptions
+            parts = []
+
+            cal_delta = actual_cal - target_cal
+            if cal_delta > 0:
+                parts.append(
+                    f"Calories +{round(cal_delta)} surplus "
+                    f"({round(actual_cal)} vs {round(target_cal)} target)"
                 )
+            else:
+                parts.append(
+                    f"Calories {round(cal_delta)} deficit "
+                    f"({round(actual_cal)} vs {round(target_cal)} target)"
+                )
+
+            prot_delta = actual_protein - target_protein
+            if abs(prot_delta) > 5:
+                sign = "+" if prot_delta > 0 else ""
+                parts.append(
+                    f"Protein {sign}{round(prot_delta)}g "
+                    f"({round(actual_protein)}g vs {round(target_protein)}g target)"
+                )
+            else:
+                parts.append(
+                    f"Protein OK ({round(actual_protein)}g vs {round(target_protein)}g target)"
+                )
+
+            carb_delta = actual_carbs - target_carbs
+            if abs(carb_delta) > 5:
+                sign = "+" if carb_delta > 0 else ""
+                parts.append(
+                    f"Carbs {sign}{round(carb_delta)}g "
+                    f"({round(actual_carbs)}g vs {round(target_carbs)}g target)"
+                )
+
+            fat_delta = actual_fats - target_fats
+            if abs(fat_delta) > 5:
+                sign = "+" if fat_delta > 0 else ""
+                parts.append(
+                    f"Fats {sign}{round(fat_delta)}g "
+                    f"({round(actual_fats)}g vs {round(target_fats)}g target)"
+                )
+
+            goals_str = ", ".join(goals) if goals else "none"
+            parts.append(f"Active goals: {goals_str}")
+
+            # Actionable recommendation (describe the nutritional profile needed,
+            # NOT specific dishes — the supplement prompt handles dish selection)
+            if cal_delta > 50 and prot_delta < -5:
+                parts.append(
+                    "Recommendation: needs high-protein, low-calorie side dish"
+                )
+            elif cal_delta < -50 and "diabetes_management" in goals:
+                carb_budget = round(target_cal * 0.35 / 4)
+                parts.append(
+                    f"Recommendation: needs high-calorie, low-carb side dish; "
+                    f"carb budget ≤{carb_budget}g"
+                )
+            elif cal_delta < -50:
+                parts.append(
+                    "Recommendation: needs calorie-dense side dish"
+                )
+            elif cal_delta > 50:
+                parts.append(
+                    "Recommendation: needs low-calorie, nutrient-dense side dish"
+                )
+            else:
+                parts.append(
+                    "Recommendation: minor gap — light side dish should suffice"
+                )
+
+            gap[m_name] = ". ".join(parts)
 
         return gap
 

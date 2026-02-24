@@ -57,7 +57,7 @@ from schemas.meal_plan import (
 )
 from services.nutrition_calculator import calculate_targets
 from services.ai_meal_planner import AIMealPlanner
-from services.portion_optimizer import PortionOptimizer
+from services.portion_optimizer import PortionOptimizer, MEAL_CALORIE_DISTRIBUTION
 from services.family_plan_validator import FamilyPlanValidator
 from services.sse_progress import ProgressEmitter, STEPS_HYBRID, STEPS_LLM_ONLY
 # C4: import shared helpers from the canonical module (public names, no underscores)
@@ -304,6 +304,8 @@ async def _allocate_with_retry(
     member_targets: list,
     profile,
     day_meals: list,
+    meal_fraction: float = None,
+    used_supplements: list[str] | None = None,
 ) -> Tuple[Optional[object], Optional[list]]:
     """
     Allocate portions with supplement retry, falling back to LLM-only if LP exhausted.
@@ -336,6 +338,8 @@ async def _allocate_with_retry(
         member_targets: Per-member target dicts.
         profile:        Joint UserProfile ORM object (for AI calls).
         day_meals:      All meal dicts for the same day (context for the AI fallback call).
+        meal_fraction:  Pre-computed normalized fraction of daily calories for this meal.
+                        When None, the optimizer falls back to raw MEAL_CALORIE_DISTRIBUTION.
 
     Returns:
         (result, components) on success:
@@ -348,6 +352,7 @@ async def _allocate_with_retry(
         components=components,
         member_targets=member_targets,
         meal_type=meal.get("meal_type", "lunch"),
+        meal_fraction=meal_fraction,
     )
 
     if result.feasible:
@@ -359,19 +364,32 @@ async def _allocate_with_retry(
     )
 
     # Supplement retry loop — max 2 rounds
+    if used_supplements is None:
+        used_supplements = []
+    added_supplement_names: list[str] = []
     for attempt in range(2):
         supplements = await ai_planner.suggest_supplements(
             components=components,
             gap=result.gap,
             profile=profile,
+            already_used_supplements=used_supplements,
         )
+        for s in supplements:
+            if s.get("name"):
+                added_supplement_names.append(s["name"])
+                used_supplements.append(s["name"])
         components.extend(supplements)
         result = optimizer.allocate(
             components=components,
             member_targets=member_targets,
             meal_type=meal.get("meal_type", "lunch"),
+            meal_fraction=meal_fraction,
         )
         if result.feasible:
+            # Update dish_name to include supplement side dishes
+            if added_supplement_names:
+                original_name = meal.get("dish_name", "")
+                meal["dish_name"] = original_name + " + " + " + ".join(added_supplement_names)
             logger.info(
                 f"[_allocate_with_retry] LP feasible after supplement round {attempt + 1} "
                 f"for '{meal.get('dish_name', '?')}'"
@@ -391,8 +409,45 @@ async def _allocate_with_retry(
         workflow="llm_only",
         reason="Nutritional optimisation could not converge — regenerating",
     )
-    # Replace meal in-place with the fallback's member_servings
-    meal["member_servings"] = fallback["meal"]["member_servings"]
+    # Replace meal in-place with the fallback's full meal data.
+    # Copy ALL meal-level fields (dish_name, description, cuisine, etc.) so the
+    # stored meal reflects the LLM's replacement, not the original dish that the
+    # LP couldn't solve. Without this, we'd keep "Paneer Sandwich" as dish_name
+    # but show Dal Makhani portion descriptions — a mismatch.
+    fallback_meal = fallback["meal"]
+    for key in ("dish_name", "description", "cuisine", "portion_size", "prep_time"):
+        if key in fallback_meal:
+            meal[key] = fallback_meal[key]
+    fallback_servings = fallback_meal["member_servings"]
+
+    # Post-hoc calorie scaling: the LLM-only fallback doesn't respect LP calorie
+    # bounds, so scale each member's servings to fit within the per-meal target
+    # ±CAL_TOLERANCE. This prevents fallback meals from blowing up daily totals.
+    from services.portion_optimizer import CAL_TOLERANCE
+    frac = meal_fraction if meal_fraction else MEAL_CALORIE_DISTRIBUTION.get(
+        meal.get("meal_type", "lunch"), 0.30
+    )
+    target_by_name = {m["name"]: m for m in member_targets}
+    for serving in fallback_servings:
+        m_name = serving.get("member_name", "")
+        m_target = target_by_name.get(m_name)
+        if not m_target:
+            continue
+        meal_target_cal = m_target["target_calories"] * frac
+        cal_ceiling = meal_target_cal * (1 + CAL_TOLERANCE)
+        actual_cal = serving.get("calories", 0)
+        if actual_cal > cal_ceiling and actual_cal > 0:
+            scale = cal_ceiling / actual_cal
+            for macro in ("calories", "protein", "carbs", "fats", "fiber"):
+                if serving.get(macro):
+                    serving[macro] = round(serving[macro] * scale, 1)
+            logger.info(
+                f"[_allocate_with_retry] Scaled LLM fallback for '{m_name}' "
+                f"from {actual_cal:.0f} to {serving['calories']:.0f} cal "
+                f"(meal target {meal_target_cal:.0f}, ceiling {cal_ceiling:.0f})"
+            )
+
+    meal["member_servings"] = fallback_servings
     # Remove components so store_member_servings uses the member_servings path
     meal.pop("components", None)
     # Return (None, None) to signal LLM-only fallback was used
@@ -446,9 +501,25 @@ async def _run_hybrid_workflow(
     # -----------------------------------------------------------------------
     # Steps 2-3: LP allocation per meal, with supplement retry
     # C3: delegates to _allocate_with_retry — no more inline retry logic here
+    # Normalize meal fractions per day so they always sum to 1.0, preventing
+    # systematic calorie overshoot when there are multiple snacks.
     # -----------------------------------------------------------------------
     for day in raw_plan["weekly_plan"]:
-        for meal in day["meals"]:
+        # Compute normalized fractions for this day's meal types.
+        # Snacks share a fixed 10% budget; main meals keep raw fractions.
+        # E.g. breakfast(25%) + lunch(35%) + dinner(30%) + 2 snacks(5% each) = 100%
+        day_meal_types = [m["meal_type"] for m in day["meals"]]
+        num_snacks = sum(1 for mt in day_meal_types if mt == "snack")
+        SNACK_TOTAL = 0.10
+        normalized_fractions = {}
+        for i, mt in enumerate(day_meal_types):
+            if mt == "snack":
+                normalized_fractions[i] = SNACK_TOTAL / num_snacks if num_snacks else 0.10
+            else:
+                normalized_fractions[i] = MEAL_CALORIE_DISTRIBUTION.get(mt, 0.30)
+
+        day_used_supplements: list[str] = []  # shared across meals in this day
+        for i, meal in enumerate(day["meals"]):
             result, components = await _allocate_with_retry(
                 optimizer=optimizer,
                 ai_planner=ai_planner,
@@ -457,6 +528,8 @@ async def _run_hybrid_workflow(
                 member_targets=member_targets,
                 profile=profile,
                 day_meals=day["meals"],
+                meal_fraction=normalized_fractions[i],
+                used_supplements=day_used_supplements,
             )
             if result is not None:
                 # LP succeeded (possibly after supplement rounds) — attach results
@@ -815,9 +888,21 @@ async def regenerate_day(
 
             # If hybrid, run LP on the fresh meals
             # C3: each meal's LP + supplement retry now delegated to _allocate_with_retry
+            # Normalize meal fractions so they sum to 1.0 for this day
             if workflow == "hybrid":
                 optimizer = PortionOptimizer()
-                for meal_data in meals_in_day:
+                day_meal_types = [m["meal_type"] for m in meals_in_day]
+                num_snacks = sum(1 for mt in day_meal_types if mt == "snack")
+                SNACK_TOTAL = 0.10
+                normalized_fractions = {}
+                for i, mt in enumerate(day_meal_types):
+                    if mt == "snack":
+                        normalized_fractions[i] = SNACK_TOTAL / num_snacks if num_snacks else 0.10
+                    else:
+                        normalized_fractions[i] = MEAL_CALORIE_DISTRIBUTION.get(mt, 0.30)
+
+                day_used_supplements: list[str] = []
+                for i, meal_data in enumerate(meals_in_day):
                     if meal_data.get("components"):
                         result, _ = await _allocate_with_retry(
                             optimizer=optimizer,
@@ -827,6 +912,8 @@ async def regenerate_day(
                             member_targets=member_targets,
                             profile=profile,
                             day_meals=meals_in_day,
+                            meal_fraction=normalized_fractions[i],
+                            used_supplements=day_used_supplements,
                         )
                         if result is not None:
                             # LP succeeded — attach results

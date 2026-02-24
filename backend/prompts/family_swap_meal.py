@@ -11,6 +11,14 @@ from typing import List, Dict, Any, Optional
 
 from prompts.shared_helpers import build_member_targets_table as _build_member_targets_table
 
+# Meal-type share of daily calories — must stay in sync with portion_optimizer.py.
+_MEAL_CAL_DISTRIBUTION = {
+    "breakfast": 0.25,
+    "lunch":     0.35,
+    "dinner":    0.30,
+    "snack":     0.10,
+}
+
 
 # ---------------------------------------------------------------------------
 # 3.2.1  FAMILY_SWAP_COMPONENTS_SYSTEM_PROMPT  (Hybrid workflow)
@@ -32,11 +40,11 @@ Return valid JSON matching this exact structure:
     "cuisine": "Indian",
     "prep_time": 30,
     "components": [
-      {"name": "Dal Makhani",     "unit": "katori", "cal_per_unit": 250, "protein_per_unit": 11,
+      {"name": "Dal Makhani",     "unit": "katori", "grams_per_unit": 200, "cal_per_unit": 250, "protein_per_unit": 11,
        "carbs_per_unit": 32, "fats_per_unit": 10, "fiber_per_unit": 8},
-      {"name": "Jeera Rice",      "unit": "katori", "cal_per_unit": 190, "protein_per_unit": 3,
+      {"name": "Jeera Rice",      "unit": "katori", "grams_per_unit": 180, "cal_per_unit": 190, "protein_per_unit": 3,
        "carbs_per_unit": 42, "fats_per_unit": 2,  "fiber_per_unit": 1},
-      {"name": "Cucumber Raita",  "unit": "bowl",   "cal_per_unit": 80,  "protein_per_unit": 5,
+      {"name": "Cucumber Raita",  "unit": "bowl",   "grams_per_unit": 200, "cal_per_unit": 80,  "protein_per_unit": 5,
        "carbs_per_unit": 8,  "fats_per_unit": 3,  "fiber_per_unit": 1}
     ]
   }
@@ -44,10 +52,22 @@ Return valid JSON matching this exact structure:
 
 ## COMPONENT RULES
 
-1. QUANTITY: The meal MUST have between 2 and 5 components. Never fewer than 2,
-   never more than 5.
+1. COMPONENT DECOMPOSITION — COMPOSITE vs STANDALONE:
+   • COMPOSITE dishes (ingredients mixed inseparably: biryani, pulao, fried rice,
+     khichdi, pasta, pizza, burger, upma, poha, pav bhaji, dosa batter, sandwich,
+     wrap) → model as ONE component. Macros reflect the combined dish per unit.
+     ✓  "Chicken Biryani" — 1 katori = rice + chicken + spices together, ~320 cal
+     ✗  "Biryani Rice" + "Chicken Pieces" — WRONG, artificially splits inseparable dish
 
-2. UNITS: Every component unit MUST be one of the following standard Indian/metric
+   • STANDALONE dishes (served side-by-side, independently portionable: dal, rice,
+     roti, sabzi, salad, raita, chutney, soup) → model as SEPARATE components.
+     ✓  Rajma (katori) + Brown Rice (katori) + Mixed Salad (bowl) — 3 components
+
+2. QUANTITY: The meal MUST have between 1 and 5 components. Never fewer than 1,
+   never more than 5. A composite dish like biryani or masala oats may be the sole
+   component if it is nutritionally complete on its own.
+
+3. UNITS: Every component unit MUST be one of the following standard Indian/metric
    measures: katori, bowl, roti, cup, piece, glass.
    - katori  ≈ 150 ml cooked volume (standard Indian serving cup)
    - bowl    ≈ 250 ml volume
@@ -56,32 +76,38 @@ Return valid JSON matching this exact structure:
    - piece   = 1 discrete piece (paratha, idli, etc.)
    - glass   = 250 ml liquid
 
-3. NUTRITIONAL VALUES: All numeric fields are PER ONE UNIT of that component.
+4. GRAMS PER UNIT: grams_per_unit is the weight in grams of one unit as served.
+   Typical values: rice katori ~180g, dal katori ~200g, roti ~35g, bowl ~230g,
+   cup ~240g, piece ~50g (varies by food), glass ~250g.
+
+5. NUTRITIONAL VALUES: All numeric fields are PER ONE UNIT of that component.
    Use USDA nutritional database values as reference.
 
-4. NUTRITIONAL COVERAGE: The component set must collectively cover at least:
+6. NUTRITIONAL COVERAGE: The component set must collectively cover at least:
    - A starch source   (e.g., rice, roti, bread)
    - A protein source  (e.g., dal, paneer, eggs, chicken, tofu)
    - A fibre/vegetable source (e.g., salad, sabzi, raita)
 
-5. DIETARY COMPLIANCE: ALL household allergens MUST be completely absent.
+7. DIETARY COMPLIANCE: ALL household allergens MUST be completely absent.
    The household diet_type restriction applies to every component.
 
-6. VARIETY: The new meal must be different from the meal being replaced and
+8. VARIETY: The new meal must be different from the meal being replaced and
    must not duplicate any other meals on the same day.
 
-7. OMIT TOTALS: Do NOT include meal-level calories, protein, carbs, fats, or fiber
+9. OMIT TOTALS: Do NOT include meal-level calories, protein, carbs, fats, or fiber
    totals. The LP solver will compute per-member totals.
 
 ## QUALITY ASSURANCE
 
 Before returning, verify:
 1. Exactly one "meal" object at the top level.
-2. The meal has a "components" array with 2–5 entries.
-3. Every component has all six numeric fields (cal_per_unit through fiber_per_unit).
+2. The meal has a "components" array with 1–5 entries.
+3. Every component has all seven numeric fields (grams_per_unit, cal_per_unit through fiber_per_unit).
 4. No allergens appear in any component name.
 5. prep_time is within the household's max_cook_time constraint.
 6. The dish is different from the meal being replaced.
+7. Composite dishes (biryani, pulao, fried rice, khichdi, pasta, pizza, etc.)
+   appear as a SINGLE component — never artificially split into sub-ingredients.
 
 Return ONLY valid JSON."""
 
@@ -114,7 +140,7 @@ Return valid JSON matching this exact structure:
       {
         "member_name": "Dad",
         "adjustment": "Extra dal, half rice",
-        "portion_description": "1.5 katori dal makhani, 0.5 katori jeera rice, 1 bowl raita",
+        "portion_description": "1.5 katori Dal Makhani (~300g), 0.5 katori Jeera Rice (~90g), 1 bowl Raita (~200g)",
         "calories": 580,
         "protein": 22,
         "carbs": 70,
@@ -138,6 +164,15 @@ member_servings fields (one entry per household member — NEVER skip a member):
                         standard equal share. Write "Standard portions" if no
                         adjustment is needed.
   portion_description — exact units and quantities for this member's plate.
+                        ALWAYS include approximate gram weight per item in parentheses,
+                        e.g., "1 katori Rajma (~220g), 0.5 katori Rice (~90g), 2 bowls Salad (~400g)".
+
+  COMPOSITE vs STANDALONE in portion_description:
+    Composite dishes (biryani, pulao, pizza, pasta, etc.) → describe as a single
+    item: "1.5 katori Chicken Biryani (~375g), 1 bowl Raita (~200g)"
+    NOT: "1 katori Biryani Rice (~180g), 2 pieces Chicken (~100g), 1 bowl Raita (~200g)"
+    Only list items separately when they are independently portioned on the plate.
+
   calories/protein/carbs/fats/fiber — for THIS member's serving only.
                         Sum across all member_servings must equal (within ±5%)
                         the meal-level totals.
@@ -265,13 +300,31 @@ def build_family_swap_prompt(
     targets_table = _build_member_targets_table(member_targets)
 
     # -----------------------------------------------------------------------
-    # Section 6: Workflow-specific output instruction
+    # Section 6: Per-meal calorie targets (helps the LLM size portions correctly)
+    # -----------------------------------------------------------------------
+    # Snacks share a fixed 10% budget; compute correct per-slot fraction.
+    SNACK_TOTAL = 0.10
+    num_snacks = sum(
+        1 for dm in day_meals if (dm.get("meal_type") or "") == "snack"
+    )
+    if meal_type == "snack" and num_snacks > 0:
+        meal_frac = SNACK_TOTAL / num_snacks
+    else:
+        meal_frac = _MEAL_CAL_DISTRIBUTION.get(meal_type, 0.30)
+    per_meal_lines = []
+    for m in member_targets:
+        per_meal_cal = round(m["target_calories"] * meal_frac)
+        per_meal_lines.append(f"  - {m['name']}: ~{per_meal_cal} kcal for this {meal_type}")
+    per_meal_targets_text = "\n".join(per_meal_lines)
+
+    # -----------------------------------------------------------------------
+    # Section 7: Workflow-specific output instruction
     # -----------------------------------------------------------------------
     n_members = len(member_targets)
     if workflow == "hybrid":
         output_instruction = (
             "Return a single `meal` object with a `components` array "
-            "(2–5 components, each with cal_per_unit, protein_per_unit, "
+            "(1–5 components, each with cal_per_unit, protein_per_unit, "
             "carbs_per_unit, fats_per_unit, fiber_per_unit, and unit)."
         )
     else:
@@ -307,6 +360,13 @@ def build_family_swap_prompt(
 ## Per-Member Nutritional Targets
 
 {targets_table}
+
+## Per-Meal Calorie Targets (for this {meal_type} slot — {round(meal_frac * 100)}% of daily)
+
+{per_meal_targets_text}
+
+IMPORTANT: Each member's calories for this meal MUST be close to the per-meal
+target listed above. Do NOT use their full daily calorie target for a single meal.
 
 ## Output Requirement
 

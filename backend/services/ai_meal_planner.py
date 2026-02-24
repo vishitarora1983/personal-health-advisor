@@ -35,6 +35,17 @@ from prompts.family_swap_meal import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Approximate gram weight per unit type, used as fallback when the LLM omits
+# grams_per_unit from a component.  Values represent typical Indian servings.
+_DEFAULT_GRAMS = {
+    "katori": 170,
+    "bowl": 230,
+    "cup": 240,
+    "roti": 35,
+    "piece": 50,
+    "glass": 250,
+}
+
 
 # ---------------------------------------------------------------------------
 # Provider abstraction
@@ -729,11 +740,21 @@ Use USDA nutritional database standards. Be as accurate as possible based on typ
                                 f"Meal '{meal.get('dish_name')}' missing components array"
                             )
                         n_comp = len(meal["components"])
-                        if not (2 <= n_comp <= 5):
+                        if not (1 <= n_comp <= 5):
                             raise ValueError(
                                 f"Meal '{meal.get('dish_name')}' has {n_comp} components "
-                                f"(must be 2–5)"
+                                f"(must be 1–5)"
                             )
+
+                # Ensure every component has a numeric grams_per_unit,
+                # falling back to a default based on the unit type.
+                for day in weekly_plan:
+                    for meal in day.get("meals", []):
+                        for comp in meal.get("components", []):
+                            gpu = comp.get("grams_per_unit")
+                            if not isinstance(gpu, (int, float)) or gpu <= 0:
+                                unit = comp.get("unit", "")
+                                comp["grams_per_unit"] = _DEFAULT_GRAMS.get(unit, 0)
 
                 logger.info(
                     "[Family Components] Successfully generated 7-day component plan"
@@ -757,29 +778,35 @@ Use USDA nutritional database standards. Be as accurate as possible based on typ
         components: List[Dict],
         gap: Dict[str, str],
         profile,
+        already_used_supplements: list[str] | None = None,
     ) -> List[Dict]:
         """
-        Ask the LLM for 2–3 supplement components to address an LP infeasibility gap.
+        Ask the LLM for 1 side-dish component to address an LP infeasibility gap.
 
         Called when PortionOptimizer.allocate() returns feasible=False. The returned
-        components are appended to the meal's existing component list and the LP is
-        re-run. This gives the hybrid workflow a recovery mechanism for meals where
-        the initial component set cannot satisfy all member targets.
+        component is appended to the meal's existing component list and the LP is
+        re-run. Up to 2 rounds may be attempted by the caller, progressively adding
+        1 side dish per round.
 
         Args:
             components: Existing component list for the meal (name, unit, cal_per_unit,
                         protein_per_unit, carbs_per_unit, fats_per_unit, fiber_per_unit).
             gap:        Dict from PortionResult.gap mapping member name to gap string.
             profile:    Joint UserProfile (used for allergy/diet_type context).
+            already_used_supplements: Names of supplements already used in other meals
+                        today, to avoid repetition.
 
         Returns:
-            List of component dicts with the same schema as `components`. 2–3 items.
+            List of component dicts with the same schema as `components`. Exactly 1 item.
 
         Raises:
             Exception: On JSON parse failure or missing "supplements" key.
         """
-        user_prompt = build_supplement_prompt(components, gap, profile)
-        logger.info(f"[Supplements] Requesting supplements for gap: {gap}")
+        user_prompt = build_supplement_prompt(
+            components, gap, profile,
+            already_used_supplements=already_used_supplements,
+        )
+        logger.info(f"[Supplements] Requesting 1 side dish for gap: {gap}")
 
         response_text = await self._chat(
             system_content=SUPPLEMENT_PROMPT,
@@ -795,7 +822,9 @@ Use USDA nutritional database standards. Be as accurate as possible based on typ
             logger.warning("[Supplements] LLM returned no supplements")
             return []
 
-        logger.info(f"[Supplements] Received {len(supplements)} supplement(s)")
+        # Truncate to 1 — each supplement round adds exactly 1 side dish
+        supplements = supplements[:1]
+        logger.info(f"[Supplements] Using 1 side dish: {supplements[0].get('name', '?')}")
         return supplements
 
     async def describe_adjustments(
@@ -1013,6 +1042,12 @@ Use USDA nutritional database standards. Be as accurate as possible based on typ
                 raise ValueError(
                     "Swap response missing 'components' array (hybrid workflow)"
                 )
+            # Ensure grams_per_unit on every component (fallback to defaults)
+            for comp in new_meal["components"]:
+                gpu = comp.get("grams_per_unit")
+                if not isinstance(gpu, (int, float)) or gpu <= 0:
+                    unit = comp.get("unit", "")
+                    comp["grams_per_unit"] = _DEFAULT_GRAMS.get(unit, 0)
         else:
             servings = new_meal.get("member_servings", [])
             if len(servings) != len(member_targets):

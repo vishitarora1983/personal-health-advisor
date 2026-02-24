@@ -818,6 +818,13 @@ function MemberServingsDisplay({ servings }: { servings: MemberServing[] }) {
                 )}
               </div>
 
+              {/* Portion description with gram weights */}
+              {serving.portion_description && (
+                <p className="text-[11px] mb-1" style={{ color: 'var(--text-secondary)' }}>
+                  {serving.portion_description}
+                </p>
+              )}
+
               {/* Per-member macro row */}
               <div
                 className="flex items-center gap-3 text-[10px]"

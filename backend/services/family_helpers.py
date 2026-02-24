@@ -36,6 +36,12 @@ from services.nutrition_calculator import calculate_targets
 logger = logging.getLogger(__name__)
 
 
+def _format_quantity(value: float) -> str:
+    """Format a numeric quantity for display: drop '.0' from whole numbers."""
+    rounded = round(value, 2)
+    return str(int(rounded)) if rounded == int(rounded) else str(rounded)
+
+
 # =============================================================================
 # 1. Member loading and target building
 # =============================================================================
@@ -286,13 +292,22 @@ def store_member_servings(
                 )
                 continue
 
-            # Build a human-readable portion_description from the LP allocations
+            # Build a human-readable portion_description from the LP allocations,
+            # including approximate gram weights when grams_per_unit is available.
+            grams_map = {c["name"]: c.get("grams_per_unit", 0) for c in components}
             alloc = allocations.get(member_name, {})
-            portion_parts = [
-                f"{round(units, 2)} {unit_map.get(comp_name, '')} {comp_name}".strip()
-                for comp_name, units in alloc.items()
-                if units > 0
-            ]
+            portion_parts = []
+            for comp_name, units in alloc.items():
+                if units <= 0:
+                    continue
+                formatted = _format_quantity(units)
+                unit_label = unit_map.get(comp_name, "")
+                grams_per = grams_map.get(comp_name, 0)
+                if grams_per and grams_per > 0:
+                    total_grams = round(units * grams_per)
+                    portion_parts.append(f"{formatted} {unit_label} {comp_name} (~{total_grams}g)")
+                else:
+                    portion_parts.append(f"{formatted} {unit_label} {comp_name}".strip())
             portion_desc = ", ".join(portion_parts) if portion_parts else None
 
             serving = MealMemberServing(

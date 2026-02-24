@@ -38,7 +38,7 @@ from schemas.meal_plan import (
 )
 from services.ai_meal_planner import AIMealPlanner
 from services.nutrition_calculator import calculate_targets
-from services.portion_optimizer import PortionOptimizer
+from services.portion_optimizer import PortionOptimizer, MEAL_CALORIE_DISTRIBUTION
 # C4: shared helpers — canonical source replaces both the old cross-router import
 # (routers.meal_plan._sum_member_servings / _store_member_servings) and the local
 # load_member_targets duplicate defined further below.
@@ -226,13 +226,23 @@ async def swap_meal(
             new_meal_inner = new_meal_data["meal"]
 
             # If hybrid: run LP on the new meal's components to produce
-            # per_member_nutrition + allocations
+            # per_member_nutrition + allocations.
+            # Compute normalized fraction for this meal slot from the day's meal types.
             if workflow == "hybrid" and new_meal_inner.get("components"):
+                all_day_meal_types = [m.meal_type for m in day_meals]
+                num_snacks = sum(1 for mt in all_day_meal_types if mt == "snack")
+                SNACK_TOTAL = 0.10
+                if meal.meal_type == "snack":
+                    swap_fraction = SNACK_TOTAL / num_snacks if num_snacks else 0.10
+                else:
+                    swap_fraction = MEAL_CALORIE_DISTRIBUTION.get(meal.meal_type, 0.30)
+
                 optimizer = PortionOptimizer()
                 result = optimizer.allocate(
                     components=new_meal_inner["components"],
                     member_targets=member_targets,
                     meal_type=meal.meal_type,
+                    meal_fraction=swap_fraction,
                 )
                 if result.feasible:
                     new_meal_inner["allocations"]          = result.allocations
