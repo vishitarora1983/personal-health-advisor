@@ -13,6 +13,7 @@ from typing import List, Dict, Any, Optional
 
 from prompts.shared_helpers import build_household_context as _shared_household_context
 from prompts.shared_helpers import build_member_targets_table as _shared_targets_table
+from prompts.cuisine_library import build_cuisine_guidance
 
 
 # ---------------------------------------------------------------------------
@@ -24,6 +25,13 @@ FAMILY_COMPONENTS_SYSTEM_PROMPT = """You are an expert nutritionist and family m
 A separate optimization engine will compute the exact portion allocated to each
 family member; you only need to provide the nutritional density per unit.
 
+## CUISINE AWARENESS
+
+The user prompt includes cuisine-specific rules (forbidden items, preferred ingredients,
+meal-type restrictions). Always follow those rules when selecting dishes and ingredients.
+The examples in this system prompt are format demonstrations only — always match
+the user's selected cuisines, not the example dishes.
+
 ## WHY COMPONENTS MATTER
 
 Each meal is modelled as a set of independently-portionable components. A linear-
@@ -32,11 +40,14 @@ so that their individual calorie and macro targets are met.
 
 CRITICAL DISTINCTION — a "component" is a DISH that can be portioned separately on
 the plate, NOT a raw ingredient:
-  • Standalone dishes (dal, rice, roti, salad, sabzi, raita) → each is its own component.
-  • Composite/combined dishes where ingredients are physically mixed (biryani, pulao,
-    fried rice, khichdi, pasta, pizza, burger, upma, poha, pav bhaji) → the whole dish
-    is ONE component with combined per-unit macros. Never split a composite dish into
-    sub-ingredients.
+  • Standalone dishes (rice, salad, grilled protein, soup, bread, steamed vegetables)
+    → each is its own component.
+  • Composite/combined dishes where ingredients are physically mixed (biryani, fried
+    rice, pasta, pizza, risotto, sushi rolls, burrito bowls, stir-fry noodles)
+    → the whole dish is ONE component with combined per-unit macros. Never split a
+    composite dish into sub-ingredients.
+  • NEVER include condiments (chutneys, pickles, ketchup, soy sauce packets) in any
+    meal. They are NOT meal components or side dishes.
 
 ## OUTPUT JSON SCHEMA
 
@@ -49,30 +60,30 @@ Return valid JSON matching this exact structure:
       "meals": [
         {
           "meal_type": "dinner",
-          "dish_name": "Rajma + Brown Rice + Salad",
-          "description": "Hearty north-Indian dinner with legume protein and complex carbs.",
-          "cuisine": "Indian",
+          "dish_name": "Grilled Chicken + Steamed Rice + Mixed Salad",
+          "description": "Balanced dinner with lean protein, complex carbs, and fresh vegetables.",
+          "cuisine": "Mediterranean",
           "prep_time": 35,
           "components": [
             {
-              "name": "Rajma",
-              "unit": "katori",
-              "grams_per_unit": 220,
-              "cal_per_unit": 220,
-              "protein_per_unit": 13,
-              "carbs_per_unit": 35,
-              "fats_per_unit": 8,
-              "fiber_per_unit": 11
+              "name": "Grilled Chicken",
+              "unit": "piece",
+              "grams_per_unit": 150,
+              "cal_per_unit": 230,
+              "protein_per_unit": 35,
+              "carbs_per_unit": 0,
+              "fats_per_unit": 10,
+              "fiber_per_unit": 0
             },
             {
-              "name": "Brown Rice",
-              "unit": "katori",
+              "name": "Steamed Rice",
+              "unit": "cup",
               "grams_per_unit": 180,
               "cal_per_unit": 200,
               "protein_per_unit": 4,
               "carbs_per_unit": 45,
               "fats_per_unit": 1,
-              "fiber_per_unit": 3
+              "fiber_per_unit": 1
             },
             {
               "name": "Mixed Salad",
@@ -91,7 +102,7 @@ Return valid JSON matching this exact structure:
   ]
 }
 
-// Example 2: composite dish — biryani is ONE component, sides are separate
+// Example 2: composite dish — pasta is ONE component, sides are separate
 {
   "weekly_plan": [
     {
@@ -99,30 +110,30 @@ Return valid JSON matching this exact structure:
       "meals": [
         {
           "meal_type": "lunch",
-          "dish_name": "Chicken Biryani + Cucumber Raita + Green Salad",
-          "description": "Fragrant layered biryani with cooling raita and fresh salad.",
-          "cuisine": "Indian",
-          "prep_time": 45,
+          "dish_name": "Chicken Pesto Pasta + Minestrone Soup + Green Salad",
+          "description": "Hearty Italian-style lunch with creamy pesto pasta and light soup.",
+          "cuisine": "Italian",
+          "prep_time": 30,
           "components": [
             {
-              "name": "Chicken Biryani",
-              "unit": "katori",
+              "name": "Chicken Pesto Pasta",
+              "unit": "cup",
               "grams_per_unit": 250,
-              "cal_per_unit": 320,
-              "protein_per_unit": 18,
-              "carbs_per_unit": 40,
-              "fats_per_unit": 10,
-              "fiber_per_unit": 2
+              "cal_per_unit": 340,
+              "protein_per_unit": 20,
+              "carbs_per_unit": 38,
+              "fats_per_unit": 12,
+              "fiber_per_unit": 3
             },
             {
-              "name": "Cucumber Raita",
+              "name": "Minestrone Soup",
               "unit": "bowl",
-              "grams_per_unit": 200,
-              "cal_per_unit": 80,
-              "protein_per_unit": 5,
-              "carbs_per_unit": 8,
-              "fats_per_unit": 3,
-              "fiber_per_unit": 1
+              "grams_per_unit": 250,
+              "cal_per_unit": 90,
+              "protein_per_unit": 4,
+              "carbs_per_unit": 14,
+              "fats_per_unit": 2,
+              "fiber_per_unit": 3
             },
             {
               "name": "Green Salad",
@@ -144,32 +155,28 @@ Return valid JSON matching this exact structure:
 ## COMPONENT RULES
 
 1. COMPONENT DECOMPOSITION — COMPOSITE vs STANDALONE:
-   • COMPOSITE dishes (ingredients mixed inseparably: biryani, pulao, fried rice,
-     khichdi, pasta, pizza, burger, upma, poha, pav bhaji, dosa batter, sandwich,
+   • COMPOSITE dishes (ingredients mixed inseparably: biryani, fried rice, pasta,
+     risotto, sushi rolls, burrito bowls, stir-fry noodles, pizza, burger, sandwich,
      wrap) → model as ONE component. Macros reflect the combined dish per unit.
-     ✓  "Chicken Biryani" — 1 katori = rice + chicken + spices together, ~320 cal
-     ✗  "Biryani Rice" + "Chicken Pieces" — WRONG, artificially splits inseparable dish
+     ✓  "Chicken Pesto Pasta" — 1 cup = pasta + chicken + sauce together, ~340 cal
+     ✗  "Plain Pasta" + "Chicken Pieces" + "Pesto" — WRONG, artificially splits inseparable dish
 
-   • STANDALONE dishes (served side-by-side, independently portionable: dal, rice,
-     roti, sabzi, salad, raita, chutney, soup) → model as SEPARATE components.
-     ✓  Rajma (katori) + Brown Rice (katori) + Mixed Salad (bowl) — 3 components
+   • STANDALONE dishes (served side-by-side, independently portionable: rice, bread,
+     grilled protein, soup, salad, steamed vegetables) → model as SEPARATE components.
+     ✓  Grilled Chicken (piece) + Steamed Rice (cup) + Mixed Salad (bowl) — 3 components
+     ✗  NEVER include condiments (chutneys, pickles, ketchup, soy sauce packets).
 
 2. QUANTITY: Each meal MUST have between 1 and 5 components. Never fewer than 1,
-   never more than 5. A composite dish like biryani or masala oats may be the sole
+   never more than 5. A composite dish like pasta or fried rice may be the sole
    component if it is nutritionally complete on its own.
 
-3. UNITS: Every component unit MUST be one of the following standard Indian/metric
-   measures: katori, bowl, roti, cup, piece, glass.
-   - katori  ≈ 150 ml cooked volume (standard Indian serving cup)
-   - bowl    ≈ 250 ml volume
-   - cup     ≈ 240 ml
-   - roti    = 1 whole roti (~35 g)
-   - piece   = 1 discrete piece (paratha, idli, etc.)
-   - glass   = 250 ml liquid
+3. UNITS: Every component unit MUST be one of the standard measures listed in
+   the user prompt's Unit Vocabulary section. Always prefer units that are
+   natural for the selected cuisine.
 
 4. GRAMS PER UNIT: grams_per_unit is the weight in grams of one unit as served.
-   Typical values: rice katori ~180g, dal katori ~200g, roti ~35g, bowl ~230g,
-   cup ~240g, piece ~50g (varies by food), glass ~250g.
+   Typical values: rice cup ~180g, stew/curry cup ~200g, flatbread ~35g,
+   bowl ~230g, cup ~240g, piece ~50-150g (varies by food), glass ~250g.
 
 5. NUTRITIONAL VALUES: All cal_per_unit, protein_per_unit, carbs_per_unit,
    fats_per_unit, and fiber_per_unit are PER ONE UNIT of that component.
@@ -177,9 +184,9 @@ Return valid JSON matching this exact structure:
 
 6. NUTRITIONAL COVERAGE: The component set for each meal must collectively cover
    at least three distinct nutritional profiles:
-   - A starch source   (e.g., rice, roti, bread, oats)
-   - A protein source  (e.g., dal, paneer, eggs, chicken, tofu)
-   - A fibre/vegetable source (e.g., salad, sabzi, cooked vegetables)
+   - A starch source   (e.g., rice, bread, pasta, oats, tortilla)
+   - A protein source  (e.g., legumes, eggs, chicken, tofu, fish, cheese)
+   - A fibre/vegetable source (e.g., salad, steamed vegetables, soup)
 
 7. DIETARY COMPLIANCE: ALL household allergens listed in the user prompt MUST be
    completely absent from every component across all 7 days. The household diet_type
@@ -200,7 +207,7 @@ Before returning, verify:
 3. Every component has all seven numeric fields (grams_per_unit, cal_per_unit through fiber_per_unit).
 4. No allergens appear in any component name.
 5. prep_time is present and within the household's max_cook_time constraint.
-6. Composite dishes (biryani, pulao, fried rice, khichdi, pasta, pizza, etc.)
+6. Composite dishes (biryani, fried rice, pasta, risotto, stir-fry noodles, pizza, etc.)
    appear as a SINGLE component — never artificially split into sub-ingredients."""
 
 
@@ -226,30 +233,26 @@ Each member's gap now contains detailed diagnostic data:
 
 Use this data to select a side dish that specifically addresses the imbalance:
 - **Calorie surplus + protein deficit** (common with muscle_building/high_protein goals):
-  → Suggest a HIGH-PROTEIN, LOW-CALORIE side dish. Pick from a VARIETY of options
-    such as: moong sprouts chaat, boiled chana salad, paneer bhurji (dry), egg bhurji,
-    Greek yogurt bowl, masoor dal soup, soya chunks, grilled chicken tikka, keema,
-    fish tikka, tofu stir-fry, curd with flaxseeds.
+  → HIGH-PROTEIN, LOW-CALORIE side dish. Think legume salads, grilled lean protein,
+    yogurt-based dishes, egg preparations, sprouts, or tofu.
 - **Calorie deficit + carb-capped** (common with diabetes_management):
-  → Suggest a HIGH-CALORIE, LOW-CARB side dish. Pick from a VARIETY of options
-    such as: mixed nuts, paneer tikka, cheese cubes, avocado, ghee-roasted seeds,
-    almond butter, coconut chutney, egg omelette.
+  → HIGH-CALORIE, LOW-CARB side dish. Think nuts, cheese, healthy fats (avocado, seeds,
+    nut butters), egg-based dishes, or grilled protein.
 - **Calorie deficit without carb cap**:
-  → Suggest a calorie-dense side dish. Pick from a VARIETY of options
-    such as: peanut butter toast, banana shake, dry fruit ladoo, paratha with ghee,
-    makhana, chikki, fruit and nut mix.
+  → CALORIE-DENSE side dish. Think nut-based snacks, grain sides, shakes, dried fruit,
+    or energy-rich preparations.
 - **Minor gap**:
-  → Suggest a light complementary side: raita, salad, curd, chutney, pickle.
+  → Light complementary side: salad, yogurt, fruit, or a small portion of any
+    nutrient-dense food.
 
 IMPORTANT: VARY your suggestions across meals. Do NOT always pick the same side dish.
-If the base components already include a protein source like chicken, suggest a DIFFERENT
-protein source (e.g., sprouts, paneer, eggs, soya, fish). Complement the main dish
-rather than repeating its ingredients.
+Complement the main dish rather than repeating its ingredients.
 
 ## SIDE DISH GUIDELINES
 
-- The side dish must follow the standard unit vocabulary:
-  katori, bowl, roti, cup, piece, glass.
+- The user prompt includes cuisine-specific rules (forbidden items, preferred ingredients,
+  meal-type restrictions). Always follow those rules when choosing a side dish.
+- The side dish must use a unit from the Unit Vocabulary section in the user prompt.
 - Suggest a real, complementary side dish that a family would actually serve alongside
   the main dish.
 - Do NOT repeat any component already listed in the base components.
@@ -266,14 +269,14 @@ rather than repeating its ingredients.
 {
   "supplements": [
     {
-      "name": "Cucumber Raita",
+      "name": "Greek Yogurt Bowl",
       "unit": "bowl",
       "grams_per_unit": 200,
-      "cal_per_unit": 80,
-      "protein_per_unit": 5,
+      "cal_per_unit": 100,
+      "protein_per_unit": 10,
       "carbs_per_unit": 8,
       "fats_per_unit": 3,
-      "fiber_per_unit": 1
+      "fiber_per_unit": 0
     }
   ]
 }
@@ -296,29 +299,29 @@ adjustment description for each member per meal.
 
 - Write from the member's perspective ("Your portion is …").
 - Use natural language: avoid raw numbers unless helpful.
-  Good: "Half a katori of rice, a full serving of rajma, and an extra bowl of salad."
-  Bad:  "rice=0.5, rajma=1.0, salad=2.0"
+  Good: "Half a cup of rice, a full serving of chicken, and an extra bowl of salad."
+  Bad:  "rice=0.5, chicken=1.0, salad=2.0"
 - Where a member's allocation differs significantly from a "standard" serving,
   note it: "extra salad", "half the usual rice", "double protein".
 - Keep each description to 1–2 sentences maximum.
 - Do NOT mention calories or grams explicitly; this text is displayed to users.
-- For composite dishes (biryani, fried rice, pasta, etc.), describe the portion
-  as one unit: "A generous katori of biryani" — NOT "more rice and less chicken
-  from the biryani". The dish is mixed and served as one unit.
+- For composite dishes (biryani, fried rice, pasta, risotto, etc.), describe the
+  portion as one unit: "A generous cup of pasta" — NOT "more noodles and less
+  chicken from the pasta". The dish is mixed and served as one unit.
 
 ## OUTPUT JSON SCHEMA
 
 {
   "adjustments": {
     "MealType_DishName": {
-      "MemberName": "Full portion of rajma, half rice, extra salad to meet your low-carb targets.",
+      "MemberName": "Full portion of chicken, half rice, extra salad to meet your low-carb targets.",
       "AnotherMember": "Standard portions across the board — everything balanced for your goal."
     }
   }
 }
 
 The key format for each meal is "{meal_type}_{dish_name}" with spaces replaced by
-underscores and all lowercase. Example: "dinner_rajma_brown_rice_salad".
+underscores and all lowercase. Example: "dinner_grilled_chicken_steamed_rice_salad".
 
 Return ONLY valid JSON."""
 
@@ -331,6 +334,13 @@ FAMILY_DIRECT_SYSTEM_PROMPT = """You are an expert nutritionist and family meal 
 meal plan for a household with multiple members. For EVERY meal, provide individual
 portion instructions for EVERY household member.
 
+## CUISINE AWARENESS
+
+The user prompt includes cuisine-specific rules (forbidden items, preferred ingredients,
+meal-type restrictions). Always follow those rules when selecting dishes and ingredients.
+The examples in this system prompt are format demonstrations only — always match
+the user's selected cuisines, not the example dishes.
+
 ## OUTPUT JSON SCHEMA
 
 {
@@ -340,11 +350,11 @@ portion instructions for EVERY household member.
       "meals": [
         {
           "meal_type": "dinner",
-          "dish_name": "Rajma + Brown Rice + Salad",
-          "description": "Hearty north-Indian dinner.",
-          "cuisine": "Indian",
+          "dish_name": "Grilled Chicken + Steamed Rice + Mixed Salad",
+          "description": "Balanced dinner with lean protein and fresh vegetables.",
+          "cuisine": "Mediterranean",
           "prep_time": 35,
-          "portion_size": "4 katori rajma, 4 katori rice, 4 bowls salad",
+          "portion_size": "4 pieces grilled chicken (600g), 4 cups rice (720g), 4 bowls salad (800g)",
           "calories": 2100,
           "protein": 78,
           "carbs": 310,
@@ -353,8 +363,8 @@ portion instructions for EVERY household member.
           "member_servings": [
             {
               "member_name": "Dad",
-              "adjustment": "Half rice, extra salad, add cucumber raita",
-              "portion_description": "1 katori Rajma (~220g), 0.5 katori Rice (~90g), 2 bowls Salad (~400g), 1 bowl Raita (~200g)",
+              "adjustment": "Half rice, extra salad, add yogurt dip",
+              "portion_description": "1 piece Grilled Chicken (~150g), 0.5 cup Rice (~90g), 2 bowls Salad (~400g), 1 bowl Yogurt Dip (~200g)",
               "calories": 520,
               "protein": 22,
               "carbs": 65,
@@ -363,8 +373,8 @@ portion instructions for EVERY household member.
             },
             {
               "member_name": "Mom",
-              "adjustment": "No rice, extra veggies, 1 roti instead",
-              "portion_description": "1 katori Rajma (~220g), 1 Roti (~35g), 1 bowl Salad (~200g), 1 bowl Sautéed Veggies (~230g)",
+              "adjustment": "No rice, extra veggies, 1 piece bread instead",
+              "portion_description": "1 piece Grilled Chicken (~150g), 1 piece Bread (~40g), 1 bowl Salad (~200g), 1 bowl Steamed Veggies (~230g)",
               "calories": 480,
               "protein": 20,
               "carbs": 58,
@@ -382,8 +392,8 @@ portion instructions for EVERY household member.
 
 meal-level fields:
   portion_size       — TOTAL household quantity (all members combined), expressed in
-                       natural units with gram weight, e.g., "4 katori rajma (600g),
-                       4 katori rice (800g)". NEVER use "1 serving".
+                       natural units with gram weight, e.g., "4 pieces chicken (600g),
+                       4 cups rice (720g)". NEVER use "1 serving".
   calories/protein/carbs/fats/fiber — TOTAL for ALL members combined.
 
 member_servings fields (one entry per household member — NEVER skip a member):
@@ -393,12 +403,12 @@ member_servings fields (one entry per household member — NEVER skip a member):
                        Write "Standard portions" if no adjustment is needed.
   portion_description — exact units and quantities for this member's plate.
                        ALWAYS include approximate gram weight per item in parentheses,
-                       e.g., "1 katori Rajma (~220g), 0.5 katori Rice (~90g), 2 bowls Salad (~400g)".
+                       e.g., "1 piece Grilled Chicken (~150g), 0.5 cup Rice (~90g), 2 bowls Salad (~400g)".
 
   COMPOSITE vs STANDALONE in portion_description:
-    Composite dishes (biryani, pulao, pizza, pasta, etc.) → describe as a single
-    item: "1.5 katori Chicken Biryani (~375g), 1 bowl Raita (~200g)"
-    NOT: "1 katori Biryani Rice (~180g), 2 pieces Chicken (~100g), 1 bowl Raita (~200g)"
+    Composite dishes (biryani, pasta, fried rice, risotto, stir-fry, etc.) → describe
+    as a single item: "1.5 cups Chicken Pasta (~375g), 1 bowl Soup (~200g)"
+    NOT: "1 cup Pasta (~180g), 2 pieces Chicken (~100g), 1 bowl Sauce (~50g)"
     Only list items separately when they are independently portioned on the plate.
 
   calories/protein/carbs/fats/fiber — for THIS member's serving only.
@@ -431,7 +441,8 @@ Before returning, verify:
 3. Sum of member calories ≈ meal-level calories (±5%).
 4. Allergens absent from all portion_description and adjustment text.
 5. prep_time ≤ household max_cook_time (unless advanced cooking skill).
-6. portion_size at meal level uses explicit quantities with gram weights."""
+6. portion_size at meal level uses explicit quantities with gram weights.
+7. NO condiments (chutneys, pickles, ketchup, soy sauce packets) appear as components, sides, or supplements."""
 
 
 # ---------------------------------------------------------------------------
@@ -538,6 +549,7 @@ def build_supplement_prompt(
     gap: Dict[str, str],
     joint_profile,
     already_used_supplements: Optional[List[str]] = None,
+    meal_type: Optional[str] = None,
 ) -> str:
     """
     Build the user message for the supplement call.
@@ -555,6 +567,8 @@ def build_supplement_prompt(
                          diet_type context.
         already_used_supplements: Names of supplements already used in other meals
                          today. The LLM should avoid repeating these.
+        meal_type:       "breakfast", "lunch", "dinner", or "snack". Used to ensure
+                         the suggested supplement is appropriate for the meal slot.
 
     Returns:
         str: User message to send alongside SUPPLEMENT_PROMPT.
@@ -587,6 +601,30 @@ def build_supplement_prompt(
             f"You MUST suggest a DIFFERENT side dish from the ones listed above.\n"
         )
 
+    # Build cuisine-specific guidance (forbidden items, meal-type restrictions,
+    # prefer/avoid rules) — same library used by the weekly and swap prompts.
+    cuisines = joint_profile.cuisines_list if hasattr(joint_profile, "cuisines_list") else []
+    cuisine_section = build_cuisine_guidance(cuisines)
+
+    # Generic meal-slot guidance (applies regardless of cuisine selection)
+    meal_type_section = ""
+    if meal_type:
+        meal_type_section = f"\n## Meal Slot: {meal_type}\n\n"
+        if meal_type == "breakfast":
+            meal_type_section += (
+                "This supplement is for a BREAKFAST meal. Suggest ONLY breakfast-appropriate items:\n"
+                "  Good: yogurt, eggs, fruit, smoothies, nuts, toast, light protein dishes.\n"
+                "  BAD: heavy dinner-style mains, grilled meats, rich gravies — NOT breakfast foods.\n"
+                "  Follow the cuisine rules in the user prompt to pick a culturally appropriate breakfast side.\n"
+            )
+        elif meal_type == "snack":
+            meal_type_section += (
+                "This supplement is for a SNACK slot. Suggest light, quick items:\n"
+                "  Good: fruit, nuts, yogurt, protein shakes, cheese, light bites.\n"
+                "  BAD: full main courses, heavy grain dishes, rich sauces.\n"
+                "  Follow the cuisine rules in the user prompt to pick a culturally appropriate snack.\n"
+            )
+
     prompt = f"""## Gap Descriptions
 
 {gap_lines}
@@ -599,7 +637,8 @@ def build_supplement_prompt(
 
 - Diet type: {diet_type} — supplements must comply
 - {allergen_text}
-{avoid_section}
+{cuisine_section}
+{meal_type_section}{avoid_section}
 Suggest exactly 1 side dish that helps close the gaps above. Return ONLY valid JSON."""
 
     return prompt

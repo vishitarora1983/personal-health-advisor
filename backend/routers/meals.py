@@ -265,19 +265,20 @@ async def swap_meal(
 
             # Update Meal row with household totals
             meal_totals = sum_member_servings(new_meal_inner)
-            meal.dish_name    = new_meal_inner.get("dish_name", meal.dish_name)
-            meal.description  = new_meal_inner.get("description")
-            meal.cuisine      = new_meal_inner.get("cuisine")
-            meal.portion_size = new_meal_inner.get("portion_size")
-            meal.calories     = meal_totals["calories"]
-            meal.protein      = meal_totals["protein"]
-            meal.carbs        = meal_totals["carbs"]
-            meal.fats         = meal_totals["fats"]
-            meal.fiber        = meal_totals.get("fiber")
-            meal.prep_time    = new_meal_inner.get("prep_time")
+            meal.dish_name        = new_meal_inner.get("dish_name", meal.dish_name)
+            meal.description      = new_meal_inner.get("description")
+            meal.cuisine          = new_meal_inner.get("cuisine")
+            meal.portion_size     = new_meal_inner.get("portion_size")
+            meal.calories         = meal_totals["calories"]
+            meal.protein          = meal_totals["protein"]
+            meal.carbs            = meal_totals["carbs"]
+            meal.fats             = meal_totals["fats"]
+            meal.fiber            = meal_totals.get("fiber")
+            meal.prep_time        = new_meal_inner.get("prep_time")
+            meal.supplement_names = None  # Swapped meal is fresh — no supplements
             # Clear old recipe — regenerated on demand
-            meal.ingredients  = None
-            meal.recipe_brief = None
+            meal.ingredients      = None
+            meal.recipe_brief     = None
 
             # Delete old MealMemberServing rows for this meal before inserting new ones.
             # The UniqueConstraint on (meal_id, member_profile_id) requires explicit

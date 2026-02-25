@@ -8,6 +8,8 @@ restrictions and user preferences.
 
 from typing import List, Optional, Dict, Any
 
+from prompts.cuisine_library import build_cuisine_guidance
+
 
 # Main system prompt for full weekly meal plan generation
 SYSTEM_PROMPT = """You are an expert nutritionist and meal planner with deep knowledge of nutrition science, culinary arts, and dietary health. Your role is to create personalized, practical, and delicious meal plans.
@@ -27,9 +29,16 @@ SYSTEM_PROMPT = """You are an expert nutritionist and meal planner with deep kno
 - **Dinner**: 30% of daily calories
 - **Snacks**: 10% of daily calories (split evenly across number of snacks)
 
+### Cuisine Awareness
+- The user prompt includes cuisine-specific rules (forbidden items, preferred ingredients,
+  meal-type restrictions). Always follow those rules when selecting dishes and ingredients.
+- The examples in this system prompt are format demonstrations only — always match
+  the user's selected cuisines, not the example dishes.
+
 ### Dietary Restrictions Compliance
 - **NEVER** include ingredients the user is allergic to
 - **NEVER** include foods the user has marked to avoid
+- **NEVER** include condiments (chutneys, pickles, ketchup, soy sauce packets) as meal components or side dishes
 - Respect diet type strictly:
   - `vegetarian`: No meat, poultry, fish, seafood
   - `vegan`: No animal products (meat, dairy, eggs, honey)
@@ -54,7 +63,7 @@ SYSTEM_PROMPT = """You are an expert nutritionist and meal planner with deep kno
 
 ### Recipe Quality Standards
 - **CRITICAL: Portion sizes MUST be exact with weight in grams**. Every portion_size MUST include total grams in parentheses.
-  - GOOD: "2 rotis (120g) + 1 cup dal (250g)" or "1 bowl oatmeal (350g)" or "2 eggs (100g) + 2 toast slices (60g)"
+  - GOOD: "1 bowl oatmeal (350g)" or "2 eggs (100g) + 2 toast slices (60g)" or "1 cup pasta (250g) + 1 piece chicken (150g)"
   - BAD: "1 serving", "1 plate", "1 portion", "a bowl of..." — these are NEVER acceptable
 - For households with multiple people, portion_size is the TOTAL for the entire household. Always state the total weight.
 - Ingredients must include specific quantities and units
@@ -185,7 +194,7 @@ MEAL_PLAN_JSON_SCHEMA = {
                                 },
                                 "portion_size": {
                                     "type": "string",
-                                    "description": "TOTAL quantity for the full household with exact weight in grams. Examples: '1 bowl oatmeal (350g)', '2 rotis (120g) + 1 cup dal (250g)', '6 oz chicken breast (170g) + 1 cup rice (200g)'. MUST always include grams in parentheses. NEVER '1 serving' or '1 plate'."
+                                    "description": "TOTAL quantity for the full household with exact weight in grams. Examples: '1 bowl oatmeal (350g)', '1 cup pasta (250g) + 1 piece chicken (150g)', '2 eggs (100g) + 2 toast slices (60g)'. MUST always include grams in parentheses. NEVER '1 serving' or '1 plate'."
                                 },
                                 "calories": {
                                     "type": "number",
@@ -333,7 +342,7 @@ def build_user_prompt(profile, nutrition_targets: Dict[str, Any]) -> str:
 {kid_text}
 ## Dietary Profile
 - **Diet Type**: {profile.diet_type}{' (strictly enforce all restrictions)' if profile.diet_type != 'none' else ''}{allergies_text}{avoid_text}{include_text}{cuisines_text}
-
+{build_cuisine_guidance(cuisines)}
 ## Cooking Profile
 - **Skill Level**: {profile.cooking_skill}
 - **Maximum Cooking Time**: {profile.max_cook_time} minutes per meal

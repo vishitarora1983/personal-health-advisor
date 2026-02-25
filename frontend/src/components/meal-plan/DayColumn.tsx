@@ -159,7 +159,7 @@ export function DayColumn({
                         </span>
                       )}
                     </div>
-                    <div className="flex flex-wrap gap-x-5 gap-y-2">
+                    <div className="flex flex-col gap-2.5">
                       <NutritionStat
                         icon={<Flame className="h-3.5 w-3.5" />}
                         label="Calories"
@@ -202,8 +202,25 @@ export function DayColumn({
       ) : (
         /* Standard single-person nutrition bar */
         <Card padding="md">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex flex-wrap gap-x-6 gap-y-3">
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <p
+                className="text-xs font-semibold uppercase tracking-wider"
+                style={{ color: 'var(--brand-green-light)' }}
+              >
+                Daily Nutrition
+              </p>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => onRegenerateDay(dayIndex)}
+                loading={regeneratingDay}
+              >
+                <RefreshCw className="h-4 w-4 mr-1.5" />
+                Regenerate Day
+              </Button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2.5">
               <NutritionStat
                 icon={<Flame className="h-4 w-4" />}
                 label="Calories"
@@ -237,16 +254,6 @@ export function DayColumn({
                 color="var(--color-info)"
               />
             </div>
-
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => onRegenerateDay(dayIndex)}
-              loading={regeneratingDay}
-            >
-              <RefreshCw className="h-4 w-4 mr-1.5" />
-              Regenerate Day
-            </Button>
           </div>
         </Card>
       )}
@@ -299,39 +306,51 @@ function NutritionStat({
   const isOnTarget = deviation <= 0.05;
   const isSlightlyOff = deviation > 0.05 && deviation <= 0.15;
 
+  const fillColor = !target
+    ? color
+    : isOnTarget
+      ? 'var(--brand-green)'
+      : isSlightlyOff
+        ? 'var(--brand-amber)'
+        : 'var(--color-error)';
+
+  // Bar width: clamp at 130% so over-target bars don't explode layout
+  const fillPct = target ? Math.min((value / target) * 100, 130) : 100;
+
   return (
-    <div className="flex items-center gap-2">
-      <div
-        className="flex items-center justify-center w-8 h-8 rounded-lg"
-        style={{ background: `${color}15`, color }}
-      >
-        {icon}
-      </div>
-      <div>
-        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-          {label}
-        </p>
-        <p className="text-sm font-bold" style={{ color: 'var(--text-secondary)' }}>
+    <div className="flex flex-col gap-1">
+      {/* Label row: icon + label left, value / target right */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <span style={{ color }}>{icon}</span>
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            {label}
+          </span>
+        </div>
+        <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
           {value}
-          <span className="font-normal text-xs ml-0.5" style={{ color: 'var(--text-muted)' }}>
+          {target != null && (
+            <span className="font-normal" style={{ color: 'var(--text-muted)' }}>
+              {' '}/ {Math.round(target)}
+            </span>
+          )}
+          <span className="font-normal ml-0.5" style={{ color: 'var(--text-muted)' }}>
             {unit}
           </span>
-        </p>
-        {target != null && (
-          <p
-            className="text-[10px] font-medium"
-            style={{
-              color: isOnTarget
-                ? 'var(--brand-green)'
-                : isSlightlyOff
-                  ? 'var(--brand-amber)'
-                  : 'var(--color-error)',
-            }}
-          >
-            Target: {Math.round(target)}{unit}
-          </p>
-        )}
+        </span>
       </div>
+      {/* Horizontal bar */}
+      {target != null && (
+        <div
+          className="h-1.5 w-full rounded-full overflow-hidden"
+          style={{ background: `${color}15` }}
+        >
+          <div
+            className="h-full rounded-full transition-all duration-500"
+            style={{ width: `${fillPct}%`, background: fillColor }}
+          />
+        </div>
+      )}
     </div>
   );
 }

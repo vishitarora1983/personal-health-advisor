@@ -13,12 +13,101 @@ import {
   Copy,
   Repeat2,
   Users,
+  Sunrise,
+  Sun,
+  Sunset,
+  Cookie,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { formatMacros, capitalize, getDayName } from '@/lib/utils';
 import type { Meal, DailyPlan, MemberNutritionTargets, KidProfile, MemberServing } from '@/types';
+
+// ── Meal type theme config ────────────────────────────────────────────────────
+
+interface MealTheme {
+  icon: LucideIcon;
+  label: string;
+  /** CSS color for the icon, label text, and glow */
+  color: string;
+  /** linear-gradient for the header background */
+  gradient: string;
+  /** radial-gradient overlay for atmospheric top-glow */
+  glow: string;
+  /** box-shadow for the icon container */
+  iconShadow: string;
+  /** Badge variant for the meal type pill */
+  badgeVariant: 'success' | 'warning' | 'info' | 'neutral';
+  /** Path to atmospheric background image */
+  image: string;
+  /** Gradient overlay that blends the image into the card — fades from solid left to transparent right */
+  imageOverlay: string;
+  /** object-position for the background image */
+  imagePosition: string;
+}
+
+const MEAL_THEMES: Record<string, MealTheme> = {
+  breakfast: {
+    icon: Sunrise,
+    label: 'Breakfast',
+    color: 'var(--brand-amber)',
+    gradient: 'linear-gradient(135deg, rgba(230,146,10,0.12) 0%, rgba(240,168,48,0.06) 100%)',
+    glow: 'radial-gradient(ellipse 60% 80% at 50% 0%, rgba(230,146,10,0.14), transparent 70%)',
+    iconShadow: '0 0 12px var(--brand-amber-glow), 0 0 24px rgba(230,146,10,0.08)',
+    badgeVariant: 'warning',
+    image: '/images/meals/breakfast.jpg',
+    imageOverlay:
+      'linear-gradient(to right, rgba(20,16,8,0.95) 0%, rgba(20,16,8,0.6) 35%, rgba(20,16,8,0.1) 70%, rgba(20,16,8,0.05) 100%), ' +
+      'linear-gradient(to bottom, transparent 50%, rgba(20,16,8,0.9) 100%)',
+    imagePosition: 'center 30%',
+  },
+  lunch: {
+    icon: Sun,
+    label: 'Lunch',
+    color: 'var(--brand-green-light)',
+    gradient: 'linear-gradient(135deg, rgba(27,139,77,0.10) 0%, rgba(42,175,101,0.05) 100%)',
+    glow: 'radial-gradient(ellipse 60% 80% at 50% 0%, rgba(27,139,77,0.12), transparent 70%)',
+    iconShadow: '0 0 12px var(--brand-green-glow), 0 0 24px rgba(27,139,77,0.08)',
+    badgeVariant: 'success',
+    image: '/images/meals/lunch.jpg',
+    imageOverlay:
+      'linear-gradient(to right, rgba(8,18,12,0.95) 0%, rgba(8,18,12,0.6) 35%, rgba(8,18,12,0.1) 70%, rgba(8,18,12,0.0) 100%), ' +
+      'linear-gradient(to bottom, transparent 50%, rgba(8,18,12,0.9) 100%)',
+    imagePosition: 'center 25%',
+  },
+  dinner: {
+    icon: Sunset,
+    label: 'Dinner',
+    color: 'var(--color-twilight)',
+    gradient: 'linear-gradient(135deg, rgba(99,130,202,0.10) 0%, rgba(230,146,10,0.04) 100%)',
+    glow: 'radial-gradient(ellipse 60% 80% at 50% 0%, var(--color-twilight-glow), transparent 70%)',
+    iconShadow: '0 0 12px var(--color-twilight-glow), 0 0 24px rgba(99,130,202,0.08)',
+    badgeVariant: 'info',
+    image: '/images/meals/dinner.jpg',
+    imageOverlay:
+      'linear-gradient(to right, rgba(12,10,20,0.95) 0%, rgba(12,10,20,0.6) 35%, rgba(12,10,20,0.1) 70%, rgba(12,10,20,0.0) 100%), ' +
+      'linear-gradient(to bottom, transparent 50%, rgba(12,10,20,0.9) 100%)',
+    imagePosition: 'center 40%',
+  },
+  snack: {
+    icon: Cookie,
+    label: 'Snack',
+    color: 'rgba(168,130,214,1)',
+    gradient: 'linear-gradient(135deg, rgba(168,130,214,0.08) 0%, rgba(139,92,246,0.04) 100%)',
+    glow: 'radial-gradient(ellipse 60% 80% at 50% 0%, var(--color-snack-glow), transparent 70%)',
+    iconShadow: '0 0 12px var(--color-snack-glow), 0 0 24px rgba(168,130,214,0.08)',
+    badgeVariant: 'neutral',
+    image: '/images/meals/snack.jpg',
+    imageOverlay:
+      'linear-gradient(to right, rgba(14,8,22,0.95) 0%, rgba(14,8,22,0.6) 35%, rgba(14,8,22,0.1) 70%, rgba(14,8,22,0.0) 100%), ' +
+      'linear-gradient(to bottom, transparent 50%, rgba(14,8,22,0.9) 100%)',
+    imagePosition: 'center 35%',
+  },
+};
+
+const DEFAULT_THEME = MEAL_THEMES.snack;
 
 interface MealCardProps {
   meal: Meal;
@@ -37,11 +126,120 @@ interface MealCardProps {
   isRepeat?: boolean;
 }
 
+// ── DishNameWithSupplements — styles supplement side dishes differently ───────
+
+/**
+ * Renders a dish_name string with supplement side dishes visually distinguished.
+ *
+ * dish_name format: "Base1 + Base2 + Supplement1 + Supplement2"
+ * supplementNames:  ["Supplement1", "Supplement2"]
+ *
+ * Base components render at full weight/opacity. Supplement names render smaller
+ * and dimmer with a "side" label to indicate they target specific members.
+ */
+function DishNameWithSupplements({
+  dishName,
+  supplementNames,
+}: {
+  dishName: string;
+  supplementNames?: string[] | null;
+}) {
+  if (!supplementNames || supplementNames.length === 0) {
+    return <>{dishName}</>;
+  }
+
+  // Build a Set for fast lookup (case-insensitive)
+  const supplementSet = new Set(supplementNames.map((n) => n.toLowerCase().trim()));
+
+  // Split on " + " and classify each segment
+  const parts = dishName.split(/\s*\+\s*/);
+
+  // Find the boundary: last consecutive base component
+  // (supplements are always appended at the end by _allocate_with_retry)
+  const baseParts: string[] = [];
+  const suppParts: string[] = [];
+  let hitSupplement = false;
+  for (const part of parts) {
+    if (!hitSupplement && !supplementSet.has(part.toLowerCase().trim())) {
+      baseParts.push(part);
+    } else {
+      hitSupplement = true;
+      suppParts.push(part);
+    }
+  }
+
+  return (
+    <>
+      {baseParts.join(' + ')}
+      {suppParts.length > 0 && (
+        <>
+          <span style={{ color: 'var(--text-muted)' }}>{' + '}</span>
+          <span
+            className="text-sm font-normal italic"
+            style={{ color: 'var(--text-secondary)', opacity: 0.8 }}
+          >
+            {suppParts.join(' + ')}
+          </span>
+        </>
+      )}
+    </>
+  );
+}
+
 /**
  * Scale a portion_size string by a ratio, adjusting all numeric quantities and gram weights.
  * e.g. "2 cups chickpeas (500g) + 4 bhature (400g total)" with ratio 0.56
  *    → "~1 cups chickpeas (~280g) + ~2 bhature (~224g total)"
  */
+/**
+ * Sum portion_description strings across multiple members into one consolidated string.
+ * Each description is comma-separated items like "1.5 bowl Curd (~220g), 2 piece Roti (~70g)".
+ * Items with the same label (everything after the leading number) are merged by summing qty + grams.
+ */
+function sumPortionDescriptions(descriptions: string[]): string {
+  // Map from normalised label → { qty, grams }
+  const totals = new Map<string, { qty: number; grams: number; label: string }>();
+
+  for (const desc of descriptions) {
+    // Split on comma (items) — also handle " + " as separator
+    const items = desc.split(/\s*,\s*|\s*\+\s*/);
+    for (const item of items) {
+      const trimmed = item.trim();
+      if (!trimmed) continue;
+
+      // Match leading number, then the rest:  "1.6 bowl Curd (~241g)"
+      const m = trimmed.match(/^(\d+\.?\d*)\s+(.+)/);
+      if (!m) continue;
+
+      const qty = parseFloat(m[1]);
+      const rest = m[2]; // "bowl Curd (~241g)"
+
+      // Extract grams from parentheses if present
+      const gm = rest.match(/\(~?(\d+\.?\d*)\s*g\)/);
+      const grams = gm ? parseFloat(gm[1]) : 0;
+
+      // Label for grouping: rest without the gram parenthetical, normalised
+      const label = rest.replace(/\s*\(~?\d+\.?\d*\s*g\)/, '').trim();
+      const key = label.toLowerCase();
+
+      const prev = totals.get(key);
+      if (prev) {
+        prev.qty += qty;
+        prev.grams += grams;
+      } else {
+        totals.set(key, { qty, grams, label });
+      }
+    }
+  }
+
+  return Array.from(totals.values())
+    .map(({ qty, grams, label }) => {
+      const q = qty % 1 === 0 ? String(qty) : qty.toFixed(1).replace(/0$/, '');
+      return grams > 0 ? `${q} ${label} (~${Math.round(grams)}g)` : `${q} ${label}`;
+    })
+    .join(', ');
+}
+
 function scalePortionString(portionSize: string, ratio: number): string {
   const parts = portionSize.split(/\s*\+\s*/);
 
@@ -149,23 +347,91 @@ export function MealCard({
 
   return (
     <Card padding="none" hover className="flex flex-col">
-      {/* Meal Type Accent Strip */}
-      <div
-        className="h-1 rounded-t-2xl"
-        style={{
-          background: getMealTypeGradient(meal.meal_type),
-        }}
-      />
+      {/* Themed Meal Type Header — cinematic image blend */}
+      {(() => {
+        const theme = MEAL_THEMES[meal.meal_type] || DEFAULT_THEME;
+        const Icon = theme.icon;
+        return (
+          <div
+            className="relative flex items-end rounded-t-2xl overflow-hidden"
+            style={{ height: 72 }}
+          >
+            {/* Background image — fills the header */}
+            <div
+              className="absolute inset-0"
+              style={{
+                backgroundImage: `url(${theme.image})`,
+                backgroundSize: 'cover',
+                backgroundPosition: theme.imagePosition,
+              }}
+            />
+            {/* Gradient overlay — solid on left (text area), fades to reveal image on right,
+                plus a bottom fade that blends seamlessly into the card body */}
+            <div className="absolute inset-0" style={{ background: theme.imageOverlay }} />
+            {/* Atmospheric top glow */}
+            <div
+              className="absolute inset-0 pointer-events-none"
+              style={{ background: theme.glow }}
+            />
+            {/* Content row — pinned to bottom-left */}
+            <div className="relative flex items-center gap-3 px-4 pb-2.5 w-full">
+              {/* Icon with frosted glass halo */}
+              <div
+                className="flex items-center justify-center rounded-lg shrink-0"
+                style={{
+                  width: 34,
+                  height: 34,
+                  background: 'rgba(0,0,0,0.35)',
+                  backdropFilter: 'blur(8px)',
+                  boxShadow: theme.iconShadow,
+                }}
+              >
+                <Icon className="h-[18px] w-[18px]" style={{ color: theme.color }} />
+              </div>
+              {/* Meal type label */}
+              <span
+                className="text-[11px] font-bold uppercase tracking-[0.18em]"
+                style={{
+                  color: theme.color,
+                  textShadow: '0 1px 6px rgba(0,0,0,0.6)',
+                }}
+              >
+                {theme.label}
+              </span>
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="p-4 flex flex-col flex-1 space-y-3">
         {/* Header */}
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1.5">
-              <Badge variant={getMealTypeBadge(meal.meal_type)}>
+              <Badge variant={(MEAL_THEMES[meal.meal_type] || DEFAULT_THEME).badgeVariant}>
                 {capitalize(meal.meal_type)}
               </Badge>
               <Badge variant="neutral">{capitalize(meal.cuisine)}</Badge>
+              {meal.allocation_method && (
+                <span
+                  className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wider"
+                  style={
+                    meal.allocation_method === 'lp'
+                      ? {
+                          background: 'var(--color-emerald-subtle)',
+                          color: 'var(--color-emerald)',
+                          border: '1px solid var(--color-emerald-subtle)',
+                        }
+                      : {
+                          background: 'var(--color-purple-subtle)',
+                          color: 'var(--color-purple)',
+                          border: '1px solid var(--color-purple-muted)',
+                        }
+                  }
+                >
+                  {meal.allocation_method === 'lp' ? 'LP' : 'LLM'}
+                </span>
+              )}
               {isRepeat && (
                 <span
                   className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wider"
@@ -190,7 +456,10 @@ export function MealCard({
                 // Finding 7: fontFamily removed — body already sets Inter via layout.tsx
               }}
             >
-              {meal.dish_name}
+              <DishNameWithSupplements
+                dishName={meal.dish_name}
+                supplementNames={meal.supplement_names}
+              />
             </h3>
             {/* Shared-with-kids badges + cooking multiplier */}
             {hasKidShares && (
@@ -237,50 +506,102 @@ export function MealCard({
             border: '1px solid var(--brand-green-subtle)',
           }}
         >
-          {/* Total line — labeled as "Total" for joint profiles */}
-          <div className="flex items-center justify-between text-sm">
-            <div>
-              {memberNutritionTargets && memberNutritionTargets.length > 0 && (
-                <span
-                  className="text-[10px] font-semibold uppercase tracking-wider mr-1.5"
-                  style={{ color: 'var(--brand-green-light)' }}
-                >
+          {/* Total nutrition — styled card for joint profiles, flat text for single */}
+          {meal.member_servings && meal.member_servings.length > 0 ? (
+            <div
+              className="rounded-lg px-2.5 py-2"
+              style={{
+                background: 'var(--brand-green-subtle)',
+                border: '1px solid var(--brand-green-border)',
+              }}
+            >
+              {/* Total label + prep time */}
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-semibold" style={{ color: 'var(--brand-green-light)' }}>
                   Total
                 </span>
+                <div className="flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
+                  <Clock className="h-3.5 w-3.5" />
+                  <span className="text-xs">{meal.prep_time} min</span>
+                </div>
+              </div>
+              {/* Total portion — consolidated sum across all members */}
+              {meal.member_servings!.some((s) => s.portion_description) && (
+                <PortionList
+                  description={sumPortionDescriptions(
+                    meal.member_servings!
+                      .map((s) => s.portion_description)
+                      .filter((d): d is string => !!d),
+                  )}
+                />
               )}
-              <span style={{ color: 'var(--text-muted)' }}>Calories: </span>
-              <span className="font-bold" style={{ color: 'var(--text-secondary)' }}>
-                {Math.round(meal.calories)}
-              </span>
-            </div>
-            <div className="flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
-              <Clock className="h-3.5 w-3.5" />
-              <span className="text-sm">{meal.prep_time} min</span>
-            </div>
-          </div>
-          <div
-            className="mt-1.5 flex items-center justify-between text-xs"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            <span>{formatMacros(meal.protein, meal.carbs, meal.fats)}</span>
-            {meal.portion_size && (
-              <span>
-                {memberNutritionTargets && memberNutritionTargets.length > 0
-                  ? 'Total portion'
-                  : 'Serving'}
-                :{' '}
-                <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>
-                  {hasKidShares
-                    ? scalePortionString(
-                        meal.portion_size!,
-                        1 +
-                          meal.shared_with_kids!.reduce((sum, k) => sum + k.scale_ratio, 0),
-                      )
-                    : meal.portion_size}
+              {/* Color-coded macro row — matches MemberServingsDisplay style */}
+              <div
+                className="flex items-center gap-3 text-[10px]"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <span>
+                  <span className="font-bold" style={{ color: 'var(--brand-amber)' }}>
+                    {Math.round(meal.calories)}
+                  </span>{' '}
+                  kcal
                 </span>
-              </span>
-            )}
-          </div>
+                <span>
+                  <span className="font-bold" style={{ color: 'var(--color-error)' }}>
+                    {Math.round(meal.protein)}g
+                  </span>{' '}
+                  protein
+                </span>
+                <span>
+                  <span className="font-bold" style={{ color: 'var(--brand-amber-light)' }}>
+                    {Math.round(meal.carbs)}g
+                  </span>{' '}
+                  carbs
+                </span>
+                <span>
+                  <span className="font-bold" style={{ color: 'var(--color-info)' }}>
+                    {Math.round(meal.fats)}g
+                  </span>{' '}
+                  fats
+                </span>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between text-sm">
+                <div>
+                  <span style={{ color: 'var(--text-muted)' }}>Calories: </span>
+                  <span className="font-bold" style={{ color: 'var(--text-secondary)' }}>
+                    {Math.round(meal.calories)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
+                  <Clock className="h-3.5 w-3.5" />
+                  <span className="text-sm">{meal.prep_time} min</span>
+                </div>
+              </div>
+              <div
+                className="mt-1.5 flex items-center justify-between text-xs"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <span>{formatMacros(meal.protein, meal.carbs, meal.fats)}</span>
+                {meal.portion_size && (
+                  <span>
+                    Serving:{' '}
+                    <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>
+                      {hasKidShares
+                        ? scalePortionString(
+                            meal.portion_size!,
+                            1 +
+                              meal.shared_with_kids!.reduce((sum, k) => sum + k.scale_ratio, 0),
+                          )
+                        : meal.portion_size}
+                    </span>
+                  </span>
+                )}
+              </div>
+            </>
+          )}
 
           {/* Per-person breakdown — new member_servings format or legacy fallback */}
           {meal.member_servings && meal.member_servings.length > 0 ? (
@@ -759,6 +1080,72 @@ export function MealCard({
   );
 }
 
+// ── PortionList — renders a portion string as structured rows ─────────────────
+
+function PortionList({ description }: { description: string }) {
+  if (!description) return null;
+
+  // Split on ", " or " + " — same separators as sumPortionDescriptions
+  const items = description.split(/\s*,\s*|\s*\+\s*/).filter(Boolean);
+
+  const parsed = items.map((raw) => {
+    const trimmed = raw.trim();
+    // Match leading number (possibly prefixed with ~) then the rest
+    const m = trimmed.match(/^~?(\d+\.?\d*)\s+(.+)/);
+    if (!m) return { raw: trimmed, qty: null, label: trimmed, grams: null };
+
+    const qty = m[1];
+    const rest = m[2];
+
+    // Extract gram weight from parentheses: (~377g) or (377g)
+    const gm = rest.match(/\(~?(\d+\.?\d*)\s*g\)/);
+    const grams = gm ? Math.round(parseFloat(gm[1])) : null;
+
+    // Label = rest without the gram parenthetical
+    const label = rest.replace(/\s*\(~?\d+\.?\d*\s*g\)/, '').trim();
+
+    return { raw: trimmed, qty, label, grams };
+  });
+
+  return (
+    <div className="space-y-px mb-1">
+      {parsed.map((item, i) => (
+        <div key={i} className="flex items-baseline gap-1.5">
+          <span
+            className="text-[10px] leading-none shrink-0 select-none"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            ·
+          </span>
+          <span
+            className="text-[11px] leading-tight min-w-0"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            {item.qty !== null ? (
+              <>
+                <span className="font-semibold" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {item.qty}
+                </span>{' '}
+                {item.label}
+              </>
+            ) : (
+              item.raw
+            )}
+          </span>
+          {item.grams !== null && (
+            <span
+              className="text-[10px] leading-tight shrink-0 ml-auto"
+              style={{ color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}
+            >
+              ~{item.grams}g
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── MemberServingsDisplay sub-component ──────────────────────────────────────
 
 function MemberServingsDisplay({ servings }: { servings: MemberServing[] }) {
@@ -820,9 +1207,7 @@ function MemberServingsDisplay({ servings }: { servings: MemberServing[] }) {
 
               {/* Portion description with gram weights */}
               {serving.portion_description && (
-                <p className="text-[11px] mb-1" style={{ color: 'var(--text-secondary)' }}>
-                  {serving.portion_description}
-                </p>
+                <PortionList description={serving.portion_description} />
               )}
 
               {/* Per-member macro row */}
@@ -870,24 +1255,3 @@ function MemberServingsDisplay({ servings }: { servings: MemberServing[] }) {
   );
 }
 
-// ── Utility functions ─────────────────────────────────────────────────────────
-
-function getMealTypeGradient(type: string): string {
-  const gradients: Record<string, string> = {
-    breakfast: 'linear-gradient(90deg, var(--brand-amber), var(--brand-amber-light))',
-    lunch: 'linear-gradient(90deg, var(--brand-green), var(--brand-green-light))',
-    dinner: 'linear-gradient(90deg, var(--brand-green-dark), var(--brand-green))',
-    snack: 'linear-gradient(90deg, var(--text-muted), var(--brand-green-light))',
-  };
-  return gradients[type] || gradients.snack;
-}
-
-function getMealTypeBadge(type: string): 'success' | 'warning' | 'info' | 'neutral' {
-  const variants: Record<string, 'success' | 'warning' | 'info' | 'neutral'> = {
-    breakfast: 'warning',
-    lunch: 'success',
-    dinner: 'info',
-    snack: 'neutral',
-  };
-  return variants[type] || 'neutral';
-}

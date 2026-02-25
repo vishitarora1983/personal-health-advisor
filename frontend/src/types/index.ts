@@ -345,6 +345,13 @@ export interface Meal {
   // Kid sharing info (populated when meal is shared with kids)
   shared_with_kids?: KidShareInfo[] | null;
 
+  // Allocation method: 'lp' (LP solver) or 'llm' (LLM fallback). Null for solo profiles.
+  allocation_method?: 'lp' | 'llm' | null;
+
+  // Supplement side dishes added by the LP solver during recovery.
+  // Null when no supplements were needed.
+  supplement_names?: string[] | null;
+
   // Per-member portion breakdown for joint/family plans (null for individual profiles)
   member_servings?: MemberServing[] | null;
 }

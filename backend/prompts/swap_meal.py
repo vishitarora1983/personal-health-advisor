@@ -7,6 +7,8 @@ while maintaining nutritional similarity and avoiding duplication.
 
 from typing import List, Dict, Any, Optional
 
+from prompts.cuisine_library import build_cuisine_guidance
+
 
 # JSON schema for single meal swap
 SWAP_MEAL_JSON_SCHEMA = {
@@ -19,7 +21,7 @@ SWAP_MEAL_JSON_SCHEMA = {
                 "dish_name": {"type": "string"},
                 "description": {"type": "string"},
                 "cuisine": {"type": "string"},
-                "portion_size": {"type": "string", "description": "Exact quantities using cups/bowls/grams/pieces (e.g., '1 bowl (300g)', '2 rotis + 1 cup dal'). NEVER vague '1 serving'."},
+                "portion_size": {"type": "string", "description": "Exact quantities using cups/bowls/grams/pieces (e.g., '1 bowl (300g)', '1 cup pasta (250g) + 1 piece chicken (150g)'). NEVER vague '1 serving'."},
                 "calories": {"type": "number"},
                 "protein": {"type": "number"},
                 "carbs": {"type": "number"},
@@ -103,9 +105,11 @@ def build_swap_prompt(
 2. **Completely Different**: Different dish name, different main ingredients, ideally different cuisine
 3. **Same Meal Type**: Must be a {current_meal.get('meal_type', 'unknown')}
 4. **No Duplication**: Must not match any other meals planned for this day
+5. **NEVER** include condiments (chutneys, pickles, ketchup, soy sauce packets) as meal components or side dishes
 
 ## User Constraints
 - **Diet Type**: {profile.diet_type}{allergies_text}{cuisines_text}
+{build_cuisine_guidance(cuisines)}
 - **Cooking Skill**: {profile.cooking_skill}
 - **Max Cook Time**: {profile.max_cook_time} minutes
 - **Household Size**: {profile.household_size}{reason_text}

@@ -19,7 +19,7 @@ CUSTOM_MEAL_JSON_SCHEMA = {
                 "cuisine": {"type": "string"},
                 "portion_size": {
                     "type": "string",
-                    "description": "Exact quantities using cups/bowls/grams/pieces (e.g., '1 bowl (300g)', '2 rotis + 1 cup dal'). NEVER vague '1 serving'."
+                    "description": "Exact quantities using cups/bowls/grams/pieces (e.g., '1 bowl (300g)', '1 cup pasta (250g) + 1 piece chicken (150g)'). NEVER vague '1 serving'."
                 },
                 "calories": {"type": "number"},
                 "protein": {"type": "number"},
@@ -112,7 +112,7 @@ def build_custom_meal_prompt(
 
 ## Instructions
 1. **Identify the dish**: Clean up the name, determine cuisine
-2. **Calculate TOTAL portion**: Size for {profile.household_size} person(s) total. portion_size must use exact quantities with grams (e.g., "1 bowl (300g)", "2 rotis + 1 cup dal (350g total)")
+2. **Calculate TOTAL portion**: Size for {profile.household_size} person(s) total. portion_size must use exact quantities with grams (e.g., "1 bowl (300g)", "1 cup pasta (250g) + 1 piece chicken (150g)")
 3. **Calculate TOTAL nutrition**: All calorie and macro values are for the TOTAL portion ({profile.household_size} person(s))
 4. **Estimate prep time**: Realistic prep + cook time in minutes
 5. **Check dietary warnings**: Flag if the dish conflicts with the user's diet type ({profile.diet_type}), allergens, or foods to avoid. Include specific warnings like "This dish contains eggs — conflicts with vegan diet" or "Contains peanuts — listed allergen". Return empty array [] if no conflicts.

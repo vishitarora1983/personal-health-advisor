@@ -14,6 +14,8 @@ Importers:
 
 from typing import List, Dict, Any
 
+from prompts.cuisine_library import build_cuisine_guidance
+
 
 def build_household_context(joint_profile) -> str:
     """
@@ -84,6 +86,11 @@ def build_household_context(joint_profile) -> str:
 - **Meals per day**: {meal_types_str}
 {avoid_text}
 {include_text}"""
+
+    # Inject cuisine-specific rules (do's/don'ts) when matching cuisines are selected
+    cuisine_guidance = build_cuisine_guidance(cuisines)
+    if cuisine_guidance:
+        context += "\n\n" + cuisine_guidance
 
     return context
 

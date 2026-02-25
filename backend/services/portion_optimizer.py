@@ -16,11 +16,11 @@ Dependency: pulp==2.8.0  (add to backend/requirements.txt)
 Example usage for testing:
 
     components = [
-        {"name": "Rajma",       "unit": "katori", "cal_per_unit": 220, "protein_per_unit": 13,
+        {"name": "Rajma",       "unit": "cup",  "cal_per_unit": 220, "protein_per_unit": 13,
          "carbs_per_unit": 35, "fats_per_unit": 8,   "fiber_per_unit": 11},
-        {"name": "Brown Rice",  "unit": "katori", "cal_per_unit": 200, "protein_per_unit": 4,
+        {"name": "Brown Rice",  "unit": "cup",  "cal_per_unit": 200, "protein_per_unit": 4,
          "carbs_per_unit": 45, "fats_per_unit": 1,   "fiber_per_unit": 3},
-        {"name": "Mixed Salad", "unit": "bowl",   "cal_per_unit": 50,  "protein_per_unit": 2,
+        {"name": "Mixed Salad", "unit": "bowl", "cal_per_unit": 50,  "protein_per_unit": 2,
          "carbs_per_unit": 10, "fats_per_unit": 0.5, "fiber_per_unit": 3},
     ]
 
@@ -74,6 +74,12 @@ MEAL_CALORIE_DISTRIBUTION: Dict[str, float] = {
 # targeted side dish to close the gap.
 CAL_TOLERANCE: float = 0.15
 
+# Hard macro tolerance band (±25% of per-meal macro target).
+# Prevents egregious macro overshoots (e.g., carbs +36%) for ALL profiles,
+# not just those with medical constraints. Generous enough for LP feasibility
+# with typical Indian meal components.
+MACRO_TOLERANCE: float = 0.25
+
 # Minimum units a member must take of any base component.
 # Set to 0.25 to prevent degenerate zero-portion solutions while still
 # allowing a very small allocation when a component is calorie-dense.
@@ -83,6 +89,12 @@ MIN_COMPONENT_UNITS: float = 0.25
 # 3.0 corresponds to a triple portion — beyond this the meal becomes
 # nutritionally unrealistic and the solver should instead add supplements.
 MAX_COMPONENT_UNITS: float = 3.0
+
+# Near-zero allocation threshold for filtering LP results.
+# CBC solver sometimes returns tiny positive values (e.g., 1e-7) due to
+# floating-point precision. Values below this are nutritionally meaningless
+# and are pruned from the allocations dict to keep results clean.
+NEAR_ZERO_THRESHOLD: float = 0.01
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +136,8 @@ class PortionOptimizer:
       - Minimum sharing floor (each member gets at least MIN_COMPONENT_UNITS of
         every component to ensure a coherent, complete plate)
       - Maximum sanity cap (no more than MAX_COMPONENT_UNITS per component per member)
-      - Optional medical constraints:
+      - Universal macro bands (±MACRO_TOLERANCE on protein, carbs, fats for ALL members)
+      - Optional medical constraints (stack on top of universal bands):
           diabetes_management  → carb cap at 35% of meal calories
           high_protein / muscle_building → protein floor at 30% of meal calories
 
@@ -146,10 +159,11 @@ class PortionOptimizer:
         """
         Run the LP and return allocations.
 
-        Hard calorie bounds (±CAL_TOLERANCE) prevent the LP from massively
-        overshooting calories to satisfy medical macro constraints. When the
-        hard bounds conflict with medical constraints, the LP goes infeasible
-        and the caller triggers the supplement recovery path.
+        Hard calorie bounds (±CAL_TOLERANCE) and universal macro bands
+        (±MACRO_TOLERANCE on protein/carbs/fats) prevent the LP from massively
+        overshooting any target. When these hard bounds conflict with medical
+        constraints, the LP goes infeasible and the caller triggers the
+        supplement recovery path.
 
         Args:
             components:     List of component dicts. Required keys per dict:
@@ -327,6 +341,21 @@ class PortionOptimizer:
                     f"for {meal_type}"
                 )
 
+            # 3b. Universal macro bands — prevent egregious macro deviation
+            #     for ALL members regardless of medical goals. Medical constraints
+            #     above stack on top (LP satisfies the tightest bound).
+            if _enforce_hard_cal:
+                for macro_name, member_macro_expr, meal_macro_target in [
+                    ("Protein", member_protein, meal_target_protein),
+                    ("Carbs",   member_carbs,   meal_target_carbs),
+                    ("Fats",    member_fats,    meal_target_fats),
+                ]:
+                    if meal_macro_target > 0:
+                        macro_ceiling = meal_macro_target * (1 + MACRO_TOLERANCE)
+                        macro_floor   = meal_macro_target * (1 - MACRO_TOLERANCE)
+                        prob += (member_macro_expr <= macro_ceiling, f"{macro_name}Ceiling_{m_name}")
+                        prob += (member_macro_expr >= macro_floor,   f"{macro_name}Floor_{m_name}")
+
             # 4. Protein deviation linearisation (absolute value)
             #    protein_actual - protein_target <=  protein_dev
             #    protein_target - protein_actual <=  protein_dev
@@ -360,8 +389,12 @@ class PortionOptimizer:
             )
 
             # 7. Minimum sharing floor — each member gets at least 0.25 units
-            #    of every component to avoid degenerate zero-portion solutions.
+            #    of every BASE component to avoid degenerate zero-portion solutions.
+            #    Supplements (is_supplement=True) are excluded: their lower bound
+            #    stays at 0 so the LP assigns them only to members who need them.
             for c_name in comp_names:
+                if comp_map[c_name].get("is_supplement"):
+                    continue
                 prob += (
                     x[m_name][c_name] >= MIN_COMPONENT_UNITS,
                     f"MinFloor_{m_name}_{c_name}".replace(" ", "_"),
@@ -420,9 +453,16 @@ class PortionOptimizer:
 
         for m in member_targets:
             m_name = m["name"]
-            allocations[m_name] = {
+            raw_alloc = {
                 c_name: round(pulp.value(x[m_name][c_name]), 3)
                 for c_name in comp_names
+            }
+            # Filter out near-zero allocations to keep results clean.
+            # Prevents entries like "0.0 cup Sprouts" from leaking into
+            # adjustment descriptions and portion labels.
+            allocations[m_name] = {
+                c_name: units for c_name, units in raw_alloc.items()
+                if units >= NEAR_ZERO_THRESHOLD
             }
             per_member_nutrition[m_name] = self._compute_nutrition(
                 allocations[m_name], components

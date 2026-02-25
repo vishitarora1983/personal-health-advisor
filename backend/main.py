@@ -91,6 +91,15 @@ async def lifespan(app: FastAPI):
             ))
         print("✓ Migrated user_profiles: added 'user_id' column")
 
+    # Migrate meals table: add supplement_names column
+    meal_columns = [col["name"] for col in inspector.get_columns("meals")]
+    if "supplement_names" not in meal_columns:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE meals ADD COLUMN supplement_names TEXT"
+            ))
+        print("✓ Migrated meals: added 'supplement_names' column")
+
     print("✓ Database tables created successfully")
     db_type = settings.DATABASE_URL.split("://")[0] if "://" in settings.DATABASE_URL else "sqlite"
     print(f"  Database type: {db_type}")

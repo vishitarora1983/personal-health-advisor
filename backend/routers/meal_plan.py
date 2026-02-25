@@ -58,6 +58,8 @@ from schemas.meal_plan import (
 from services.nutrition_calculator import calculate_targets
 from services.ai_meal_planner import AIMealPlanner
 from services.portion_optimizer import PortionOptimizer, MEAL_CALORIE_DISTRIBUTION
+from services.cuisine_filter import scan_plan_for_violations, violations_to_feedback
+from prompts.cuisine_library import get_forbidden_items
 from services.family_plan_validator import FamilyPlanValidator
 from services.sse_progress import ProgressEmitter, STEPS_HYBRID, STEPS_LLM_ONLY
 # C4: import shared helpers from the canonical module (public names, no underscores)
@@ -266,6 +268,16 @@ def store_family_plan(
             # Compute meal-level totals as sum of member servings
             meal_totals = sum_member_servings(meal_data)
 
+            # Determine allocation method: explicit tag from _allocate_with_retry,
+            # or infer from data shape (per_member_nutrition → lp, else → llm)
+            alloc_method = meal_data.get("allocation_method")
+            if not alloc_method:
+                alloc_method = "lp" if meal_data.get("per_member_nutrition") else "llm"
+
+            # Serialize supplement names (if any) as JSON for the DB column
+            _supp_names = meal_data.get("supplement_names")
+            _supp_json = json.dumps(_supp_names) if _supp_names else None
+
             meal_row = Meal(
                 daily_plan_id=daily_plan.id,
                 meal_type=meal_data["meal_type"],
@@ -279,6 +291,8 @@ def store_family_plan(
                 fats=meal_totals["fats"],
                 fiber=meal_totals.get("fiber"),
                 prep_time=meal_data.get("prep_time"),
+                allocation_method=alloc_method,
+                supplement_names=_supp_json,
                 # ingredients and recipe_brief are generated on demand
                 ingredients=None,
                 recipe_brief=None,
@@ -356,6 +370,7 @@ async def _allocate_with_retry(
     )
 
     if result.feasible:
+        meal["allocation_method"] = "lp"
         return result, components
 
     logger.warning(
@@ -373,11 +388,29 @@ async def _allocate_with_retry(
             gap=result.gap,
             profile=profile,
             already_used_supplements=used_supplements,
+            meal_type=meal.get("meal_type"),
         )
+        # Filter out supplements whose names contain forbidden cuisine items
+        cuisines = profile.cuisines_list if hasattr(profile, "cuisines_list") else []
+        forbidden = get_forbidden_items(cuisines) if cuisines else set()
+        if forbidden:
+            clean_supplements = []
+            for s in supplements:
+                name_lower = (s.get("name") or "").lower()
+                if any(term in name_lower for term in forbidden):
+                    logger.warning(
+                        f"[_allocate_with_retry] Discarding forbidden supplement "
+                        f"'{s.get('name')}' (matched cuisine filter)"
+                    )
+                    used_supplements.append(s["name"])
+                else:
+                    clean_supplements.append(s)
+            supplements = clean_supplements
         for s in supplements:
             if s.get("name"):
                 added_supplement_names.append(s["name"])
                 used_supplements.append(s["name"])
+            s["is_supplement"] = True
         components.extend(supplements)
         result = optimizer.allocate(
             components=components,
@@ -386,10 +419,12 @@ async def _allocate_with_retry(
             meal_fraction=meal_fraction,
         )
         if result.feasible:
+            meal["allocation_method"] = "lp"
             # Update dish_name to include supplement side dishes
             if added_supplement_names:
                 original_name = meal.get("dish_name", "")
                 meal["dish_name"] = original_name + " + " + " + ".join(added_supplement_names)
+                meal["supplement_names"] = added_supplement_names
             logger.info(
                 f"[_allocate_with_retry] LP feasible after supplement round {attempt + 1} "
                 f"for '{meal.get('dish_name', '?')}'"
@@ -448,6 +483,7 @@ async def _allocate_with_retry(
             )
 
     meal["member_servings"] = fallback_servings
+    meal["allocation_method"] = "llm"
     # Remove components so store_member_servings uses the member_servings path
     meal.pop("components", None)
     # Return (None, None) to signal LLM-only fallback was used
@@ -496,6 +532,28 @@ async def _run_hybrid_workflow(
             "AI is generating base meals for all 7 days...",
         )
     raw_plan  = await ai_planner.generate_family_components(profile, member_targets)
+
+    # Content filter: scan for cuisine-specific forbidden items
+    cuisines = profile.cuisines_list if hasattr(profile, "cuisines_list") else []
+    if cuisines:
+        content_violations = scan_plan_for_violations(raw_plan, cuisines)
+        if content_violations:
+            feedback = violations_to_feedback(content_violations)
+            logger.warning(
+                f"[Hybrid] Content filter found {len(content_violations)} violation(s), "
+                f"regenerating with feedback: {feedback}"
+            )
+            raw_plan = await ai_planner.generate_family_components(
+                profile, member_targets, content_feedback=feedback,
+            )
+            # Re-check after retry (log only, don't retry again)
+            retry_violations = scan_plan_for_violations(raw_plan, cuisines)
+            if retry_violations:
+                logger.error(
+                    f"[Hybrid] Content filter still found {len(retry_violations)} "
+                    f"violation(s) after retry: {violations_to_feedback(retry_violations)}"
+                )
+
     optimizer = PortionOptimizer()
 
     # -----------------------------------------------------------------------
@@ -655,6 +713,19 @@ async def _run_llm_only_workflow(
         workflow="llm_only",
     )
 
+    # Content filter: merge cuisine violations into warnings
+    cuisines = profile.cuisines_list if hasattr(profile, "cuisines_list") else []
+    if cuisines:
+        content_violations = scan_plan_for_violations(raw_plan, cuisines)
+        if content_violations:
+            content_feedback = violations_to_feedback(content_violations)
+            logger.warning(
+                f"[LLM-Only] Content filter found {len(content_violations)} violation(s): "
+                + "; ".join(content_feedback)
+            )
+            warnings.extend(content_feedback)
+            passed = False
+
     if passed:
         logger.info(f"[LLM-Only] Plan passed validation on first attempt")
         if emitter:
@@ -728,6 +799,20 @@ async def generate_meal_plan(
 
         try:
             meal_plan_data = await ai_planner.generate_meal_plan(profile, nutrition_targets)
+
+            # Content filter: scan for cuisine-specific forbidden items
+            solo_cuisines = profile.cuisines_list if hasattr(profile, "cuisines_list") else []
+            if solo_cuisines:
+                solo_violations = scan_plan_for_violations(meal_plan_data, solo_cuisines)
+                if solo_violations:
+                    feedback = violations_to_feedback(solo_violations)
+                    logger.warning(
+                        f"[Solo] Content filter found {len(solo_violations)} violation(s), "
+                        f"regenerating with feedback: {feedback}"
+                    )
+                    meal_plan_data = await ai_planner.generate_meal_plan(
+                        profile, nutrition_targets, content_feedback=feedback,
+                    )
 
             # Week starts tomorrow
             week_start  = date.today() + timedelta(days=1)
@@ -941,6 +1026,11 @@ async def regenerate_day(
             # Persist the new meals
             for meal_data in meals_in_day:
                 meal_totals = sum_member_servings(meal_data)
+                alloc_method = meal_data.get("allocation_method")
+                if not alloc_method:
+                    alloc_method = "lp" if meal_data.get("per_member_nutrition") else "llm"
+                _sn = meal_data.get("supplement_names")
+                _sn_json = json.dumps(_sn) if _sn else None
                 meal_row = Meal(
                     daily_plan_id=daily_plan.id,
                     meal_type=meal_data["meal_type"],
@@ -954,6 +1044,8 @@ async def regenerate_day(
                     fats=meal_totals["fats"],
                     fiber=meal_totals.get("fiber"),
                     prep_time=meal_data.get("prep_time"),
+                    allocation_method=alloc_method,
+                    supplement_names=_sn_json,
                     ingredients=None,
                     recipe_brief=None,
                 )

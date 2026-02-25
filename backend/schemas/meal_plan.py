@@ -45,6 +45,12 @@ class MealSchema(BaseModel):
     ingredients: Optional[List[IngredientSchema]] = Field(default=None, description="List of ingredients with quantities (null until recipe generated on demand)")
     recipe_brief: Optional[str] = Field(default=None, description="Short cooking instructions")
 
+    # Allocation method indicator (joint profiles only)
+    allocation_method: Optional[str] = Field(default=None, description="'lp' or 'llm' — how portions were computed. Null for solo profiles.")
+
+    # Supplement side dishes added during LP recovery
+    supplement_names: Optional[List[str]] = Field(default=None, description="Names of supplement side dishes added by the LP solver. Null when none.")
+
 
 class KidShareInfo(BaseModel):
     """Info about a kid this meal has been shared with."""
@@ -189,6 +195,18 @@ class MealResponse(MealSchema):
             except (json.JSONDecodeError, TypeError):
                 ingredients = []
 
+        # Deserialize supplement_names from JSON string
+        supp_names = None
+        if getattr(meal_obj, "supplement_names", None):
+            try:
+                supp_names = (
+                    json.loads(meal_obj.supplement_names)
+                    if isinstance(meal_obj.supplement_names, str)
+                    else meal_obj.supplement_names
+                )
+            except (json.JSONDecodeError, TypeError):
+                supp_names = None
+
         return MealResponse(
             id=meal_obj.id,
             daily_plan_id=meal_obj.daily_plan_id,
@@ -205,6 +223,8 @@ class MealResponse(MealSchema):
             prep_time=meal_obj.prep_time,
             ingredients=ingredients,
             recipe_brief=meal_obj.recipe_brief,
+            allocation_method=meal_obj.allocation_method,
+            supplement_names=supp_names,
             shared_with_kids=kid_shares,
             member_servings=member_servings,   # None for individual profiles; list for joint
         )

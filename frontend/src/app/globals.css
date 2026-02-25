@@ -84,6 +84,13 @@
     --color-emerald:        rgba(16, 185, 129, 1);
     --color-emerald-subtle: rgba(16, 185, 129, 0.15);
 
+    /* Meal-type header tokens — twilight (dinner), snack purple */
+    --color-twilight:       rgba(99, 130, 202, 1);
+    --color-twilight-glow:  rgba(99, 130, 202, 0.25);
+    --color-twilight-subtle:rgba(99, 130, 202, 0.10);
+    --color-snack-glow:     rgba(168, 130, 214, 0.25);
+    --color-snack-subtle:   rgba(168, 130, 214, 0.10);
+
     /* Shadows — pure black with opacity, works on any bg color
        glow variants add colored bloom for green/amber elements      */
     --shadow-sm:            0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);

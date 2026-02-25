@@ -36,7 +36,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Approximate gram weight per unit type, used as fallback when the LLM omits
-# grams_per_unit from a component.  Values represent typical Indian servings.
+# grams_per_unit from a component.  Covers units across all supported cuisines.
 _DEFAULT_GRAMS = {
     "katori": 170,
     "bowl": 230,
@@ -44,6 +44,10 @@ _DEFAULT_GRAMS = {
     "roti": 35,
     "piece": 50,
     "glass": 250,
+    "plate": 300,
+    "slice": 60,
+    "tortilla": 40,
+    "serving": 200,
 }
 
 
@@ -212,7 +216,8 @@ class AIMealPlanner:
     async def generate_meal_plan(
         self,
         profile,
-        nutrition_targets: Dict[str, Any]
+        nutrition_targets: Dict[str, Any],
+        content_feedback: List[str] = None,
     ) -> Dict[str, Any]:
         """
         Generate a complete 7-day meal plan using AI.
@@ -220,6 +225,9 @@ class AIMealPlanner:
         Args:
             profile: UserProfile ORM object with dietary preferences
             nutrition_targets: Dict with calculated nutrition targets
+            content_feedback: Optional list of content violation strings from a
+                previous generation attempt. Appended to the user prompt so the
+                LLM can correct specific dishes.
 
         Returns:
             Dict containing the weekly_plan array with 7 days of meals
@@ -228,6 +236,11 @@ class AIMealPlanner:
             Exception: If API call fails or response is invalid JSON
         """
         user_prompt = build_user_prompt(profile, nutrition_targets)
+        if content_feedback:
+            user_prompt += "\n\n## CONTENT VIOLATIONS — MUST FIX\n\n"
+            user_prompt += "The previous attempt contained these forbidden items. "
+            user_prompt += "You MUST replace each flagged dish with a different dish that does NOT contain the forbidden item.\n\n"
+            user_prompt += "\n".join(f"- {fb}" for fb in content_feedback)
         logger.info(f"Generating meal plan for profile {profile.id}")
 
         last_error = None
@@ -682,6 +695,7 @@ Use USDA nutritional database standards. Be as accurate as possible based on typ
         self,
         profile,
         member_targets: List[Dict],
+        content_feedback: List[str] = None,
     ) -> Dict:
         """
         Generate a 7-day family meal plan with per-component nutritional breakdowns.
@@ -692,8 +706,11 @@ Use USDA nutritional database standards. Be as accurate as possible based on typ
         structure that the solver needs.
 
         Args:
-            profile:        Joint UserProfile (is_joint == True).
-            member_targets: List of per-member target dicts as defined in Task 3.1.2.
+            profile:          Joint UserProfile (is_joint == True).
+            member_targets:   List of per-member target dicts as defined in Task 3.1.2.
+            content_feedback: Optional list of content violation strings from a
+                previous generation attempt. Appended to the user prompt so the
+                LLM can correct specific dishes.
 
         Returns:
             Dict with "weekly_plan" key containing 7 day dicts, each with "meals" array
@@ -703,6 +720,11 @@ Use USDA nutritional database standards. Be as accurate as possible based on typ
             Exception: After self.max_retries failed attempts or JSON parse errors.
         """
         user_prompt = build_family_components_prompt(profile, member_targets)
+        if content_feedback:
+            user_prompt += "\n\n## CONTENT VIOLATIONS — MUST FIX\n\n"
+            user_prompt += "The previous attempt contained these forbidden items. "
+            user_prompt += "You MUST replace each flagged dish with a different dish that does NOT contain the forbidden item.\n\n"
+            user_prompt += "\n".join(f"- {fb}" for fb in content_feedback)
         logger.info(
             f"[Family Components] Generating 7-day component plan for joint profile {profile.id}"
         )
@@ -779,6 +801,7 @@ Use USDA nutritional database standards. Be as accurate as possible based on typ
         gap: Dict[str, str],
         profile,
         already_used_supplements: list[str] | None = None,
+        meal_type: str | None = None,
     ) -> List[Dict]:
         """
         Ask the LLM for 1 side-dish component to address an LP infeasibility gap.
@@ -795,6 +818,8 @@ Use USDA nutritional database standards. Be as accurate as possible based on typ
             profile:    Joint UserProfile (used for allergy/diet_type context).
             already_used_supplements: Names of supplements already used in other meals
                         today, to avoid repetition.
+            meal_type:  "breakfast", "lunch", "dinner", or "snack". Passed to the
+                        prompt builder to ensure meal-appropriate suggestions.
 
         Returns:
             List of component dicts with the same schema as `components`. Exactly 1 item.
@@ -805,6 +830,7 @@ Use USDA nutritional database standards. Be as accurate as possible based on typ
         user_prompt = build_supplement_prompt(
             components, gap, profile,
             already_used_supplements=already_used_supplements,
+            meal_type=meal_type,
         )
         logger.info(f"[Supplements] Requesting 1 side dish for gap: {gap}")
 

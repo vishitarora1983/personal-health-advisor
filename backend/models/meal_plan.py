@@ -262,6 +262,23 @@ class Meal(Base):
         comment="Short cooking instructions (2-4 steps)"
     )
 
+    # Allocation method indicator (joint profiles only)
+    allocation_method = Column(
+        String(10),
+        nullable=True,
+        comment="'lp' if portions were computed by the LP solver, 'llm' if LLM fallback was used. Null for solo profiles."
+    )
+
+    # Supplement side dishes added by the LP recovery path.
+    # JSON array of dish names, e.g. '["Greek Yogurt Bowl", "Sprout Salad"]'.
+    # Null when no supplements were needed. Used by the frontend to visually
+    # distinguish base-dish components from targeted side dishes in the title.
+    supplement_names = Column(
+        Text,
+        nullable=True,
+        comment="JSON array of supplement dish names added during LP recovery. Null when none."
+    )
+
     # Relationships
     daily_plan = relationship("DailyPlan", back_populates="meals")
     tracking = relationship(
