@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { UtensilsCrossed, RefreshCw, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -10,9 +10,9 @@ import { Spinner } from '@/components/ui/LoadingSkeleton';
 import { WeekView } from '@/components/meal-plan/WeekView';
 import { GenerationProgress } from '@/components/meal-plan/GenerationProgress';
 import { useSSEGeneration } from '@/hooks/useSSEGeneration';
+import { useProgressBuffer } from '@/hooks/useProgressBuffer';
 import {
   getCurrentMealPlan,
-  generateMealPlan,
   generateRecipe,
   getNutritionTargets,
   getMemberNutritionTargets,
@@ -21,13 +21,11 @@ import {
   swapMeal,
   replaceWithCustomMeal,
   copyMealTo,
-  regenerateDay,
-  regeneratePlan,
 } from '@/lib/api';
 import { useProfile } from '@/lib/ProfileContext';
 import { getErrorMessage } from '@/lib/utils';
 import { ROUTES } from '@/lib/routes';
-import type { WeeklyPlan, Meal, NutritionTargets, MemberNutritionTargets, KidProfile, SSEProgressStep } from '@/types';
+import type { WeeklyPlan, DailyPlan, Meal, NutritionTargets, MemberNutritionTargets, KidProfile } from '@/types';
 
 export default function MealPlanPage() {
   const router = useRouter();
@@ -39,46 +37,72 @@ export default function MealPlanPage() {
   const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan | null>(null);
   const [swappingMealId, setSwappingMealId] = useState<number | null>(null);
   const [customReplacingMealId, setCustomReplacingMealId] = useState<number | null>(null);
-  const [regeneratingDayIndex, setRegeneratingDayIndex] = useState<number | null>(null);
-  const [regeneratingWeek, setRegeneratingWeek] = useState(false);
   const [copyingMealId, setCopyingMealId] = useState<number | null>(null);
   const [sharingMealId, setSharingMealId] = useState<number | null>(null);
   const [targets, setTargets] = useState<NutritionTargets | null>(null);
   const [memberTargets, setMemberTargets] = useState<MemberNutritionTargets[] | null>(null);
   const [kidProfiles, setKidProfiles] = useState<KidProfile[]>([]);
-  // SSE progress state — only populated during joint profile generation
-  const [sseProgress, setSseProgress] = useState<SSEProgressStep | null>(null);
 
-  // ── SSE hook for joint profile generation ──────────────────────────────────
-  // The URL embeds activeProfileId. Since start() is only called after the user
-  // actively clicks "Generate" (at which point activeProfileId is stable), a
-  // stale closure from a previous profile is not a concern in practice.
+  // ── SSE operation tracking ────────────────────────────────────────────────
+  type SSEOperation =
+    | { type: 'generate' }
+    | { type: 'regenerate-week' }
+    | { type: 'regenerate-day'; dayIndex: number };
+  const operationRef = useRef<SSEOperation | null>(null);
+
+  // ── Progress buffer for smooth SSE step transitions ────────────────────────
+  const {
+    displayProgress: sseProgress,
+    messageCounter,
+    pushEvent,
+    startDrain,
+    reset: resetBuffer,
+  } = useProgressBuffer();
+
+  // ── SSE hook for all generation operations ──────────────────────────────────
+  // The URL is a default; start() is called with urlOverride for each operation.
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
   const {
     start: startSSEGeneration,
     abort: abortSSEGeneration,
     isStreaming,
-    progress: sseProgressFromHook,
-  } = useSSEGeneration<WeeklyPlan>({
+  } = useSSEGeneration<unknown>({
     url: `${API_BASE_URL}/meal-plans/generate-family?profile_id=${activeProfileId ?? 0}`,
 
-    onComplete: (plan) => {
-      setWeeklyPlan(plan);
-      setGenerating(false);
-      setSseProgress(null);
-      toast.success('Meal plan generated successfully!');
+    onProgress: pushEvent,
+
+    onComplete: (data) => {
+      const op = operationRef.current;
+      startDrain();
+      setTimeout(() => {
+        if (op?.type === 'regenerate-day') {
+          // Merge single day into existing plan
+          setWeeklyPlan(prev => ({
+            ...prev!,
+            days: prev!.days.map((d, i) => i === op.dayIndex ? (data as DailyPlan) : d),
+          }));
+        } else {
+          setWeeklyPlan(data as WeeklyPlan);
+        }
+        setGenerating(false);
+        resetBuffer();
+        operationRef.current = null;
+        toast.success(
+          op?.type === 'regenerate-day' ? 'Day regenerated!' :
+          op?.type === 'regenerate-week' ? 'Week regenerated!' :
+          'Meal plan generated!'
+        );
+      }, 2000);
     },
 
     onError: (errorMessage) => {
       toast.error(errorMessage);
       setGenerating(false);
-      setSseProgress(null);
+      resetBuffer();
+      operationRef.current = null;
 
-      // Error recovery: the server-side generation runs as a fire-and-forget
-      // task (asyncio.ensure_future). Even if the SSE connection is lost, the
-      // generation may have completed and saved the plan. Poll after 5 seconds
-      // to retrieve a plan that was saved despite the stream failure.
+      // Error recovery: poll for a saved plan after 5 seconds
       setTimeout(async () => {
         if (!activeProfileId) return;
         try {
@@ -93,15 +117,6 @@ export default function MealPlanPage() {
       }, 5000);
     },
   });
-
-  // Sync hook progress into local state so the GenerationProgress component
-  // re-renders on every new SSE event. useEffect ensures this runs after render,
-  // matching React's rule that state updates must not occur during render.
-  useEffect(() => {
-    if (sseProgressFromHook) {
-      setSseProgress(sseProgressFromHook);
-    }
-  }, [sseProgressFromHook]);
 
   // Clean up the SSE stream on unmount or when isStreaming changes to false.
   // Prevents the hook from calling onComplete/onError after the component unmounts,
@@ -178,30 +193,14 @@ export default function MealPlanPage() {
     initialize();
   }, [activeProfileId, activeProfile, profileLoading, router, toast]);
 
-  const handleGeneratePlan = async () => {
+  const handleGeneratePlan = () => {
     if (!activeProfileId) return;
-
-    // Joint profiles use the SSE generation path for live progress streaming.
-    // The remainder of the generation lifecycle (completion, error, recovery)
-    // is handled by the useSSEGeneration callbacks above.
-    if (activeProfile?.is_joint) {
-      setGenerating(true);
-      setSseProgress(null);
-      startSSEGeneration();
-      return;
-    }
-
-    // Non-joint profiles use the existing blocking API call (no SSE)
     setGenerating(true);
-    try {
-      const plan = await generateMealPlan(activeProfileId);
-      setWeeklyPlan(plan);
-      toast.success('Meal plan generated successfully!');
-    } catch (error) {
-      toast.error(getErrorMessage(error));
-    } finally {
-      setGenerating(false);
-    }
+    resetBuffer();
+    operationRef.current = { type: 'generate' };
+    startSSEGeneration(
+      `${API_BASE_URL}/meal-plans/generate-family?profile_id=${activeProfileId}`
+    );
   };
 
   const handleSwapMeal = async (mealId: number) => {
@@ -280,37 +279,24 @@ export default function MealPlanPage() {
     }
   };
 
-  const handleRegenerateDay = async (dayIndex: number) => {
+  const handleRegenerateDay = (dayIndex: number) => {
     if (!weeklyPlan) return;
-
-    setRegeneratingDayIndex(dayIndex);
-    try {
-      const updatedDay = await regenerateDay(weeklyPlan.id, dayIndex);
-      setWeeklyPlan((prev) => ({
-        ...prev!,
-        days: prev!.days.map((d, i) => i === dayIndex ? updatedDay : d)
-      }));
-      toast.success('Day regenerated successfully!');
-    } catch (error) {
-      toast.error(getErrorMessage(error));
-    } finally {
-      setRegeneratingDayIndex(null);
-    }
+    setGenerating(true);
+    resetBuffer();
+    operationRef.current = { type: 'regenerate-day', dayIndex };
+    startSSEGeneration(
+      `${API_BASE_URL}/meal-plans/${weeklyPlan.id}/regenerate-day-stream/${dayIndex}`
+    );
   };
 
-  const handleRegeneratePlan = async () => {
+  const handleRegeneratePlan = () => {
     if (!weeklyPlan) return;
-
-    setRegeneratingWeek(true);
-    try {
-      const updatedPlan = await regeneratePlan(weeklyPlan.id);
-      setWeeklyPlan(updatedPlan);
-      toast.success('Entire week regenerated successfully!');
-    } catch (error) {
-      toast.error(getErrorMessage(error));
-    } finally {
-      setRegeneratingWeek(false);
-    }
+    setGenerating(true);
+    resetBuffer();
+    operationRef.current = { type: 'regenerate-week' };
+    startSSEGeneration(
+      `${API_BASE_URL}/meal-plans/${weeklyPlan.id}/regenerate-stream`
+    );
   };
 
   const handleRecipeLoad = async (mealId: number): Promise<Meal> => {
@@ -417,11 +403,10 @@ export default function MealPlanPage() {
           </p>
         </div>
 
-        {weeklyPlan && (
+        {weeklyPlan && !generating && (
           <Button
             variant="secondary"
             onClick={handleRegeneratePlan}
-            loading={regeneratingWeek}
           >
             <RefreshCw className="h-4 w-4 mr-2" />
             Regenerate Week
@@ -429,59 +414,55 @@ export default function MealPlanPage() {
         )}
       </div>
 
-      {/* Loading State - Generating Plan */}
-      {generating && (
-        <div className="flex flex-col items-center justify-center py-16">
+      {/* Loading State — SSE progress for all generation operations */}
+      {generating && (() => {
+        const op = operationRef.current;
+        const heading =
+          op?.type === 'regenerate-day' ? `Regenerating Day ${op.dayIndex + 1}` :
+          op?.type === 'regenerate-week' ? 'Regenerating Your Week' :
+          activeProfile?.is_joint ? 'Generating Your Family Meal Plan' :
+          'Generating Your Meal Plan';
+        const subtitle =
+          activeProfile?.is_joint
+            ? 'Personalizing portions for each household member. This typically takes 1-3 minutes.'
+            : 'Our AI is crafting a personalized meal plan tailored to your goals. This typically takes 1-2 minutes.';
 
-          {/*
-            Joint profile SSE path: show step-circle progress once SSE events arrive.
-            Before the first event (sseProgress is null), show a "Connecting..." spinner
-            so there is immediate feedback after the user clicks "Generate".
-          */}
-          {sseProgress && activeProfile?.is_joint ? (
-            <>
-              <h3 className="type-h4 text-[var(--text-primary)] mb-2">
-                Generating Your Family Meal Plan
-              </h3>
-              <GenerationProgress progress={sseProgress} />
-              <p className="text-center max-w-md text-sm text-[var(--text-muted)] mt-4">
-                Personalizing portions for each household member. This typically takes 1-3 minutes.
-              </p>
-            </>
-          ) : (
-            /* Connecting state (before first SSE event) OR non-joint profile spinner */
-            <>
-              <Loader2 className="h-16 w-16 animate-spin mb-4 text-[var(--brand-green-light)]" />
-              <h3 className="type-h4 text-[var(--text-primary)] mb-2">
-                {activeProfile?.is_joint ? 'Connecting...' : 'Generating Your Meal Plan'}
-              </h3>
-              <p className="text-center max-w-md text-sm text-[var(--text-muted)]">
-                {activeProfile?.is_joint
-                  ? 'Starting family meal plan generation...'
-                  : 'Our AI is crafting a personalized 7-day meal plan tailored to your goals. This typically takes 1-2 minutes...'
-                }
-              </p>
-            </>
-          )}
+        return (
+          <div className="flex flex-col items-center justify-center py-16">
+            {sseProgress ? (
+              <>
+                <h3 className="type-h4 text-[var(--text-primary)] mb-2">{heading}</h3>
+                <GenerationProgress progress={sseProgress} messageKey={messageCounter} />
+                <p className="text-center max-w-md text-sm text-[var(--text-muted)] mt-4">
+                  {subtitle}
+                </p>
+              </>
+            ) : (
+              <>
+                <Loader2 className="h-16 w-16 animate-spin mb-4 text-[var(--brand-green-light)]" />
+                <h3 className="type-h4 text-[var(--text-primary)] mb-2">Connecting...</h3>
+                <p className="text-center max-w-md text-sm text-[var(--text-muted)]">
+                  Starting generation...
+                </p>
+              </>
+            )}
 
-          {/* Cancel button — only shown for joint profile SSE generation */}
-          {activeProfile?.is_joint && (
             <button
               type="button"
               onClick={() => {
                 abortSSEGeneration();
                 setGenerating(false);
-                setSseProgress(null);
+                resetBuffer();
+                operationRef.current = null;
               }}
               className="mt-6 text-xs underline"
               style={{ color: 'var(--text-muted)' }}
             >
               Cancel
             </button>
-          )}
-
-        </div>
-      )}
+          </div>
+        );
+      })()}
 
       {/* Empty State - No Plan */}
       {!weeklyPlan && !generating && (
@@ -511,7 +492,6 @@ export default function MealPlanPage() {
           customReplacingMealId={customReplacingMealId ?? undefined}
           copyingMealId={copyingMealId ?? undefined}
           sharingMealId={sharingMealId ?? undefined}
-          regeneratingDayIndex={regeneratingDayIndex ?? undefined}
         />
       )}
 

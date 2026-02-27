@@ -50,15 +50,51 @@ STEPS_LLM_ONLY = [
 
 # Human-readable default messages per step
 STEP_MESSAGES: dict[str, str] = {
-    "started":                  "Preparing your personalized meal plan...",
+    "started":                  "Warming up the kitchen...",
     "generating":               "AI is crafting your 7-day meal plan...",
-    "generating_components":    "AI is generating base meals for each day...",
-    "optimizing_portions":      "LP solver is computing optimal portions per member...",
-    "generating_descriptions":  "Converting portion allocations to serving descriptions...",
-    "generating_meals":         "AI is generating meals with per-member portions...",
-    "validating":               "Validating nutrition targets for each member...",
-    "saving":                   "Saving your meal plan...",
-    "complete":                 "Your meal plan is ready!",
+    "generating_components":    "Our AI chef is designing your weekly menu...",
+    "optimizing_portions":      "Tailoring portions for every family member...",
+    "generating_descriptions":  "Writing up each member's personalized servings...",
+    "generating_meals":         "Crafting personalized meals for your family...",
+    "validating":               "Running a final nutrition check...",
+    "saving":                   "Plating up your meal plan...",
+    "complete":                 "Bon appetit! Your meal plan is ready!",
+}
+
+# Step lists for regenerate-day (no validation step)
+STEPS_REGEN_DAY_HYBRID = [
+    "started", "generating_components", "optimizing_portions",
+    "generating_descriptions", "saving", "complete",
+]
+STEPS_REGEN_DAY_LLM_ONLY = [
+    "started", "generating_meals", "saving", "complete",
+]
+
+# Rotating messages for long-running steps — cycled by start_heartbeat()
+ROTATING_MESSAGES: dict[str, list[str]] = {
+    "generating": [
+        "Our AI chef is crafting your weekly menu...",
+        "Balancing flavors and variety across 7 days...",
+        "Matching dishes to your taste preferences...",
+        "Handpicking ingredients for every meal...",
+        "Mixing up breakfast, lunch, dinner, and snacks...",
+        "Almost there — putting final touches on the menu...",
+    ],
+    "generating_components": [
+        "Our AI chef is designing your weekly menu...",
+        "Balancing flavors and variety across 7 days...",
+        "Matching dishes to your family's taste preferences...",
+        "Handpicking ingredients for every meal...",
+        "Mixing up breakfast, lunch, dinner, and snacks...",
+        "Almost there — putting final touches on the menu...",
+    ],
+    "generating_meals": [
+        "Crafting personalized meals for your family...",
+        "Designing dishes that fit every member's goals...",
+        "Balancing nutrition and taste for the household...",
+        "Building a week of delicious, goal-aligned meals...",
+        "Fine-tuning portions to hit each member's targets...",
+    ],
 }
 
 
@@ -110,6 +146,30 @@ class ProgressEmitter:
         self._queue: asyncio.Queue[Optional[ProgressEvent]] = asyncio.Queue()
         self._steps = steps
         self._total = len(steps)
+
+    def start_heartbeat(self, step: str, interval: float = 5.0) -> asyncio.Task:
+        """
+        Start a background task that emits rotating messages for a long-running step.
+
+        The first message is emitted immediately, then subsequent messages from
+        ROTATING_MESSAGES[step] are emitted every `interval` seconds. If the step
+        has no rotating messages, the default STEP_MESSAGES entry is re-emitted.
+
+        Returns the asyncio.Task so the caller can cancel it (task.cancel()) when
+        the long-running operation completes.
+        """
+        async def _heartbeat():
+            messages = ROTATING_MESSAGES.get(step, [STEP_MESSAGES.get(step, f"Processing {step}...")])
+            idx = 0
+            # Emit the first message immediately
+            await self.emit(step, messages[idx % len(messages)])
+            idx += 1
+            while True:
+                await asyncio.sleep(interval)
+                await self.emit(step, messages[idx % len(messages)])
+                idx += 1
+
+        return asyncio.create_task(_heartbeat())
 
     async def emit(self, step: str, message: Optional[str] = None, data: Optional[Any] = None) -> None:
         """

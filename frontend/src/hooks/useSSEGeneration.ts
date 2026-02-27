@@ -47,14 +47,23 @@ export interface UseSSEGenerationOptions<T> {
    * The message parameter is a human-readable error string.
    */
   onError: (error: string) => void;
+  /**
+   * Called on every "progress" SSE event, in addition to the built-in setProgress().
+   * Useful for piping events into a buffer (e.g. useProgressBuffer).
+   */
+  onProgress?: (event: SSEProgressStep) => void;
 }
 
 export interface UseSSEGenerationReturn {
   /**
-   * Initiates the SSE connection by sending a POST to the configured URL.
+   * Initiates the SSE connection by sending a POST request.
    * Sets isStreaming to true. If already streaming, this is a no-op.
+   *
+   * @param urlOverride  Optional URL to use instead of the configured `url`.
+   *                     Allows one hook instance to serve multiple SSE endpoints
+   *                     (e.g., generate, regenerate-day, regenerate-week).
    */
-  start: () => void;
+  start: (urlOverride?: string) => void;
   /**
    * Aborts the in-flight SSE connection.
    * Sets isStreaming to false. Safe to call when not streaming.
@@ -74,7 +83,7 @@ export interface UseSSEGenerationReturn {
 export function useSSEGeneration<T>(
   options: UseSSEGenerationOptions<T>
 ): UseSSEGenerationReturn {
-  const { url, onComplete, onError } = options;
+  const { url, onComplete, onError, onProgress } = options;
 
   const [isStreaming, setIsStreaming] = useState(false);
   const [progress, setProgress] = useState<SSEProgressStep | null>(null);
@@ -82,8 +91,8 @@ export function useSSEGeneration<T>(
   // AbortController ref — persists between renders, allows abort() to cancel the fetch
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Callback refs — always point to the latest version of onComplete/onError without
-  // requiring them in the useCallback deps array. This prevents stale closure bugs
+  // Callback refs — always point to the latest version of onComplete/onError/onProgress
+  // without requiring them in the useCallback deps array. This prevents stale closure bugs
   // where the start() callback captures an outdated version of the caller's handlers
   // (common when callers define callbacks inline on every render). The ref is mutated
   // synchronously on every render so it is always current before the next async tick.
@@ -91,10 +100,14 @@ export function useSSEGeneration<T>(
   onCompleteRef.current = onComplete;
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  const onProgressRef = useRef(onProgress);
+  onProgressRef.current = onProgress;
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (urlOverride?: string) => {
     // Guard: don't start a second stream if one is already in progress
     if (isStreaming) return;
+
+    const targetUrl = urlOverride || url;
 
     // Create a new AbortController for this stream session
     const controller = new AbortController();
@@ -109,7 +122,7 @@ export function useSSEGeneration<T>(
       : null;
 
     try {
-      const response = await fetch(url, {
+      const response = await fetch(targetUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -213,12 +226,14 @@ export function useSSEGeneration<T>(
 
             } else {
               // "progress" event (or any unrecognized event type treated as progress)
-              setProgress({
+              const progressEvent: SSEProgressStep = {
                 step: parsed.step,
                 stepIndex: parsed.stepIndex,
                 totalSteps: parsed.totalSteps,
                 message: parsed.message,
-              });
+              };
+              setProgress(progressEvent);
+              onProgressRef.current?.(progressEvent);
             }
           }
         }

@@ -61,7 +61,14 @@ from services.portion_optimizer import PortionOptimizer, MEAL_CALORIE_DISTRIBUTI
 from services.cuisine_filter import scan_plan_for_violations, violations_to_feedback
 from prompts.cuisine_library import get_forbidden_items
 from services.family_plan_validator import FamilyPlanValidator
-from services.sse_progress import ProgressEmitter, STEPS_HYBRID, STEPS_LLM_ONLY
+from services.sse_progress import (
+    ProgressEmitter,
+    STEPS_STANDARD,
+    STEPS_HYBRID,
+    STEPS_LLM_ONLY,
+    STEPS_REGEN_DAY_HYBRID,
+    STEPS_REGEN_DAY_LLM_ONLY,
+)
 # C4: import shared helpers from the canonical module (public names, no underscores)
 from services.family_helpers import (
     load_joint_members,
@@ -524,45 +531,56 @@ async def _run_hybrid_workflow(
     logger.info(f"[Hybrid] Starting hybrid workflow for joint profile {profile.id}")
 
     # -----------------------------------------------------------------------
-    # Step 1: LLM generates component plan
+    # Step 1: LLM generates component plan (with rotating heartbeat messages)
     # -----------------------------------------------------------------------
+    heartbeat_task = None
     if emitter:
-        await emitter.emit(
-            "generating_components",
-            "AI is generating base meals for all 7 days...",
-        )
-    raw_plan  = await ai_planner.generate_family_components(profile, member_targets)
+        heartbeat_task = emitter.start_heartbeat("generating_components", interval=5.0)
+    try:
+        raw_plan = await ai_planner.generate_family_components(profile, member_targets)
 
-    # Content filter: scan for cuisine-specific forbidden items
-    cuisines = profile.cuisines_list if hasattr(profile, "cuisines_list") else []
-    if cuisines:
-        content_violations = scan_plan_for_violations(raw_plan, cuisines)
-        if content_violations:
-            feedback = violations_to_feedback(content_violations)
-            logger.warning(
-                f"[Hybrid] Content filter found {len(content_violations)} violation(s), "
-                f"regenerating with feedback: {feedback}"
-            )
-            raw_plan = await ai_planner.generate_family_components(
-                profile, member_targets, content_feedback=feedback,
-            )
-            # Re-check after retry (log only, don't retry again)
-            retry_violations = scan_plan_for_violations(raw_plan, cuisines)
-            if retry_violations:
-                logger.error(
-                    f"[Hybrid] Content filter still found {len(retry_violations)} "
-                    f"violation(s) after retry: {violations_to_feedback(retry_violations)}"
+        # Content filter: scan for cuisine-specific forbidden items
+        cuisines = profile.cuisines_list if hasattr(profile, "cuisines_list") else []
+        if cuisines:
+            content_violations = scan_plan_for_violations(raw_plan, cuisines)
+            if content_violations:
+                feedback = violations_to_feedback(content_violations)
+                logger.warning(
+                    f"[Hybrid] Content filter found {len(content_violations)} violation(s), "
+                    f"regenerating with feedback: {feedback}"
                 )
+                raw_plan = await ai_planner.generate_family_components(
+                    profile, member_targets, content_feedback=feedback,
+                )
+                # Re-check after retry (log only, don't retry again)
+                retry_violations = scan_plan_for_violations(raw_plan, cuisines)
+                if retry_violations:
+                    logger.error(
+                        f"[Hybrid] Content filter still found {len(retry_violations)} "
+                        f"violation(s) after retry: {violations_to_feedback(retry_violations)}"
+                    )
+    finally:
+        if heartbeat_task:
+            heartbeat_task.cancel()
 
     optimizer = PortionOptimizer()
 
     # -----------------------------------------------------------------------
-    # Steps 2-3: LP allocation per meal, with supplement retry
+    # Step 2: LP allocation per meal, with supplement retry
     # C3: delegates to _allocate_with_retry — no more inline retry logic here
     # Normalize meal fractions per day so they always sum to 1.0, preventing
     # systematic calorie overshoot when there are multiple snacks.
     # -----------------------------------------------------------------------
-    for day in raw_plan["weekly_plan"]:
+    if emitter:
+        await emitter.emit("optimizing_portions")
+
+    total_days = len(raw_plan["weekly_plan"])
+    for day_idx, day in enumerate(raw_plan["weekly_plan"]):
+        if emitter:
+            await emitter.emit(
+                "optimizing_portions",
+                f"Tailoring portions for Day {day_idx + 1} of {total_days}...",
+            )
         # Compute normalized fractions for this day's meal types.
         # Snacks share a fixed 10% budget; main meals keep raw fractions.
         # E.g. breakfast(25%) + lunch(35%) + dinner(30%) + 2 snacks(5% each) = 100%
@@ -596,19 +614,17 @@ async def _run_hybrid_workflow(
             # else: LLM fallback path — meal dict already mutated by _allocate_with_retry
 
     # -----------------------------------------------------------------------
-    # Step 4: LLM describes adjustments (batched per day — one call per day)
+    # Step 3: LLM describes adjustments (batched per day — one call per day)
     # -----------------------------------------------------------------------
     if emitter:
-        await emitter.emit(
-            "optimizing_portions",
-            "LP solver is computing optimal portions per household member...",
-        )
-    if emitter:
-        await emitter.emit(
-            "generating_descriptions",
-            "Converting portion allocations to serving descriptions...",
-        )
-    for day in raw_plan["weekly_plan"]:
+        await emitter.emit("generating_descriptions")
+
+    for day_idx, day in enumerate(raw_plan["weekly_plan"]):
+        if emitter:
+            await emitter.emit(
+                "generating_descriptions",
+                f"Writing servings for Day {day_idx + 1} of {total_days}...",
+            )
         meals_with_allocations = [
             m for m in day["meals"] if "allocations" in m
         ]
@@ -634,13 +650,10 @@ async def _run_hybrid_workflow(
                 )
 
     # -----------------------------------------------------------------------
-    # Step 5: Validator (hybrid — warns only, never fails)
+    # Step 4: Validator (hybrid — warns only, never fails)
     # -----------------------------------------------------------------------
     if emitter:
-        await emitter.emit(
-            "validating",
-            "Validating daily nutrition totals for each member...",
-        )
+        await emitter.emit("validating")
     validator = FamilyPlanValidator()
     passed, warnings = validator.validate(
         daily_plans=raw_plan["weekly_plan"],
@@ -657,7 +670,7 @@ async def _run_hybrid_workflow(
     # Emit "saving" before returning so the SSE endpoint can save and then
     # call emitter.complete(). The caller is responsible for the DB commit.
     if emitter:
-        await emitter.emit("saving", "Saving your meal plan...")
+        await emitter.emit("saving")
 
     logger.info(f"[Hybrid] Workflow complete for joint profile {profile.id}")
     return raw_plan
@@ -690,22 +703,19 @@ async def _run_llm_only_workflow(
     logger.info(f"[LLM-Only] Starting llm_only workflow for joint profile {profile.id}")
     validator = FamilyPlanValidator()
 
-    # Emit generating_meals before the LLM call
+    # Emit generating_meals with heartbeat for the long LLM call
+    heartbeat_task = None
     if emitter:
-        await emitter.emit(
-            "generating_meals",
-            "AI is generating meals with per-member portions for all 7 days...",
-        )
-
-    # Initial generation attempt
-    raw_plan = await ai_planner.generate_family_meal_plan_direct(profile, member_targets)
+        heartbeat_task = emitter.start_heartbeat("generating_meals", interval=5.0)
+    try:
+        raw_plan = await ai_planner.generate_family_meal_plan_direct(profile, member_targets)
+    finally:
+        if heartbeat_task:
+            heartbeat_task.cancel()
 
     # Emit validating before running the validator
     if emitter:
-        await emitter.emit(
-            "validating",
-            "Validating nutrition targets for each member...",
-        )
+        await emitter.emit("validating")
 
     passed, warnings = validator.validate(
         daily_plans=raw_plan["weekly_plan"],
@@ -729,7 +739,7 @@ async def _run_llm_only_workflow(
     if passed:
         logger.info(f"[LLM-Only] Plan passed validation on first attempt")
         if emitter:
-            await emitter.emit("saving", "Saving your meal plan...")
+            await emitter.emit("saving")
         return raw_plan
 
     # Retry loop (max 2 retries after initial failure)
@@ -738,11 +748,18 @@ async def _run_llm_only_workflow(
             f"[LLM-Only] Validation failed (retry {retry + 1}/2). "
             f"Warnings:\n" + "\n".join(warnings)
         )
-        raw_plan = await ai_planner.generate_family_meal_plan_direct(
-            profile,
-            member_targets,
-            feedback=warnings,    # include validator warnings in the prompt
-        )
+        heartbeat_task = None
+        if emitter:
+            heartbeat_task = emitter.start_heartbeat("generating_meals", interval=5.0)
+        try:
+            raw_plan = await ai_planner.generate_family_meal_plan_direct(
+                profile,
+                member_targets,
+                feedback=warnings,    # include validator warnings in the prompt
+            )
+        finally:
+            if heartbeat_task:
+                heartbeat_task.cancel()
         passed, warnings = validator.validate(
             daily_plans=raw_plan["weekly_plan"],
             member_targets=member_targets,
@@ -751,7 +768,7 @@ async def _run_llm_only_workflow(
         if passed:
             logger.info(f"[LLM-Only] Plan passed validation on retry {retry + 1}")
             if emitter:
-                await emitter.emit("saving", "Saving your meal plan...")
+                await emitter.emit("saving")
             return raw_plan
 
     # All retries exhausted — use the last generated plan regardless
@@ -762,7 +779,7 @@ async def _run_llm_only_workflow(
         + "\n".join(warnings)
     )
     if emitter:
-        await emitter.emit("saving", "Saving your meal plan...")
+        await emitter.emit("saving")
     return raw_plan
 
 
@@ -1191,6 +1208,337 @@ async def regenerate_day(
         )
 
 
+@router.post("/{plan_id}/regenerate-day-stream/{day_index}", status_code=200)
+async def regenerate_day_stream(
+    plan_id: int,
+    day_index: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    SSE endpoint for regenerating a single day in the weekly plan.
+
+    Streams progress events as the day is regenerated, then emits a "complete"
+    event with the DailyPlanSchema JSON payload.
+
+    C1 — DB session lifecycle: same pattern as generate_family_meal_plan_stream.
+    """
+    if day_index < 0 or day_index > 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="day_index must be between 0 (Monday) and 6 (Sunday)"
+        )
+
+    weekly_plan = _verify_plan_ownership(db, plan_id, current_user)
+    profile = db.query(UserProfile).filter(
+        UserProfile.id == weekly_plan.profile_id
+    ).first()
+
+    daily_plan = db.query(DailyPlan).filter(
+        DailyPlan.weekly_plan_id == plan_id,
+        DailyPlan.day_of_week == day_index
+    ).first()
+    if not daily_plan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Day {day_index} not found in plan {plan_id}"
+        )
+
+    is_joint = profile.is_joint
+    if is_joint:
+        workflow = getattr(current_user, "family_meal_workflow", "hybrid")
+        if workflow not in ("hybrid", "llm_only"):
+            workflow = "hybrid"
+        steps = STEPS_REGEN_DAY_HYBRID if workflow == "hybrid" else STEPS_REGEN_DAY_LLM_ONLY
+    else:
+        workflow = None
+        steps = STEPS_STANDARD
+
+    emitter = ProgressEmitter(steps)
+
+    captured_plan_id      = plan_id
+    captured_day_index    = day_index
+    captured_daily_plan_id = daily_plan.id
+    captured_profile_id   = profile.id
+    captured_is_joint     = is_joint
+    captured_workflow     = workflow
+
+    async def run_regen_day():
+        local_db = SessionLocal()
+        try:
+            await emitter.emit("started")
+
+            local_profile = local_db.query(UserProfile).filter(
+                UserProfile.id == captured_profile_id
+            ).first()
+            if not local_profile:
+                await emitter.error(f"Profile {captured_profile_id} not found.")
+                return
+
+            local_daily_plan = local_db.query(DailyPlan).filter(
+                DailyPlan.id == captured_daily_plan_id
+            ).first()
+            if not local_daily_plan:
+                await emitter.error(f"Day plan not found.")
+                return
+
+            ai_planner = AIMealPlanner()
+
+            if captured_is_joint:
+                # ── Joint profile regen-day path ────────────────────────
+                member_profiles = load_joint_members(local_db, local_profile)
+                member_targets  = build_member_targets(member_profiles)
+
+                existing_dishes = [
+                    m.dish_name for m in
+                    local_db.query(Meal).join(DailyPlan).filter(
+                        DailyPlan.weekly_plan_id == captured_plan_id,
+                        DailyPlan.day_of_week != captured_day_index
+                    ).all()
+                ]
+
+                step_name = "generating_components" if captured_workflow == "hybrid" else "generating_meals"
+                heartbeat_task = emitter.start_heartbeat(step_name, interval=5.0)
+                try:
+                    meals_in_day = await ai_planner.generate_family_single_day(
+                        profile=local_profile,
+                        member_targets=member_targets,
+                        workflow=captured_workflow,
+                        day_of_week=captured_day_index,
+                        existing_dishes=existing_dishes,
+                    )
+                finally:
+                    heartbeat_task.cancel()
+
+                # Delete existing meals AND their member servings
+                old_meals = local_db.query(Meal).filter(
+                    Meal.daily_plan_id == local_daily_plan.id
+                ).all()
+                for old_meal in old_meals:
+                    local_db.query(MealMemberServing).filter(
+                        MealMemberServing.meal_id == old_meal.id
+                    ).delete()
+                local_db.query(Meal).filter(
+                    Meal.daily_plan_id == local_daily_plan.id
+                ).delete()
+
+                if captured_workflow == "hybrid":
+                    await emitter.emit("optimizing_portions")
+                    optimizer = PortionOptimizer()
+                    day_meal_types = [m["meal_type"] for m in meals_in_day]
+                    num_snacks = sum(1 for mt in day_meal_types if mt == "snack")
+                    SNACK_TOTAL = 0.10
+                    normalized_fractions = {}
+                    for i, mt in enumerate(day_meal_types):
+                        if mt == "snack":
+                            normalized_fractions[i] = SNACK_TOTAL / num_snacks if num_snacks else 0.10
+                        else:
+                            normalized_fractions[i] = MEAL_CALORIE_DISTRIBUTION.get(mt, 0.30)
+
+                    day_used_supplements: list[str] = []
+                    for i, meal_data in enumerate(meals_in_day):
+                        if meal_data.get("components"):
+                            result, _ = await _allocate_with_retry(
+                                optimizer=optimizer,
+                                ai_planner=ai_planner,
+                                meal=meal_data,
+                                components=meal_data["components"],
+                                member_targets=member_targets,
+                                profile=local_profile,
+                                day_meals=meals_in_day,
+                                meal_fraction=normalized_fractions[i],
+                                used_supplements=day_used_supplements,
+                            )
+                            if result is not None:
+                                meal_data["allocations"]          = result.allocations
+                                meal_data["per_member_nutrition"] = result.per_member_nutrition
+
+                    await emitter.emit("generating_descriptions")
+                    meals_with_alloc = [m for m in meals_in_day if "allocations" in m]
+                    if meals_with_alloc:
+                        try:
+                            adjustments = await ai_planner.describe_adjustments(
+                                meals_with_allocations=meals_with_alloc,
+                                member_targets=member_targets,
+                            )
+                            for meal_data in meals_with_alloc:
+                                meal_key = (
+                                    f"{meal_data['meal_type']}_{meal_data['dish_name']}"
+                                    .replace(" ", "_").lower()
+                                )
+                                meal_data["member_adjustment_text"] = adjustments.get(meal_key, {})
+                        except Exception as e:
+                            logger.warning(f"[regen-day-stream] describe_adjustments failed: {e}")
+
+                # Persist new meals
+                await emitter.emit("saving")
+                for meal_data in meals_in_day:
+                    meal_totals = sum_member_servings(meal_data)
+                    alloc_method = meal_data.get("allocation_method")
+                    if not alloc_method:
+                        alloc_method = "lp" if meal_data.get("per_member_nutrition") else "llm"
+                    _sn = meal_data.get("supplement_names")
+                    _sn_json = json.dumps(_sn) if _sn else None
+                    meal_row = Meal(
+                        daily_plan_id=local_daily_plan.id,
+                        meal_type=meal_data["meal_type"],
+                        dish_name=meal_data["dish_name"],
+                        description=meal_data.get("description"),
+                        cuisine=meal_data.get("cuisine"),
+                        portion_size=meal_data.get("portion_size"),
+                        calories=meal_totals["calories"],
+                        protein=meal_totals["protein"],
+                        carbs=meal_totals["carbs"],
+                        fats=meal_totals["fats"],
+                        fiber=meal_totals.get("fiber"),
+                        prep_time=meal_data.get("prep_time"),
+                        allocation_method=alloc_method,
+                        supplement_names=_sn_json,
+                        ingredients=None,
+                        recipe_brief=None,
+                    )
+                    local_db.add(meal_row)
+                    local_db.flush()
+                    store_member_servings(local_db, meal_row.id, meal_data, member_targets)
+
+                day_totals = sum_day_totals(meals_in_day)
+                local_daily_plan.total_calories = day_totals["calories"]
+                local_daily_plan.total_protein  = day_totals["protein"]
+                local_daily_plan.total_carbs    = day_totals["carbs"]
+                local_daily_plan.total_fats     = day_totals["fats"]
+
+            else:
+                # ── Solo profile regen-day path ─────────────────────────
+                nutrition_targets = calculate_targets(local_profile)
+                existing_dishes = [
+                    m.dish_name for m in
+                    local_db.query(Meal).join(DailyPlan).filter(
+                        DailyPlan.weekly_plan_id == captured_plan_id,
+                        DailyPlan.day_of_week != captured_day_index
+                    ).all()
+                ]
+
+                heartbeat_task = emitter.start_heartbeat("generating", interval=5.0)
+                try:
+                    meals_in_day = await ai_planner.generate_single_day(
+                        local_profile, nutrition_targets,
+                        existing_dishes=existing_dishes,
+                    )
+                finally:
+                    heartbeat_task.cancel()
+
+                # Delete existing meals
+                local_db.query(Meal).filter(
+                    Meal.daily_plan_id == local_daily_plan.id
+                ).delete()
+
+                await emitter.emit("saving")
+
+                local_daily_plan.total_calories = sum(m.get("calories", 0) for m in meals_in_day)
+                local_daily_plan.total_protein  = sum(m.get("protein",  0) for m in meals_in_day)
+                local_daily_plan.total_carbs    = sum(m.get("carbs",    0) for m in meals_in_day)
+                local_daily_plan.total_fats     = sum(m.get("fats",     0) for m in meals_in_day)
+
+                for meal_data in meals_in_day:
+                    meal_row = Meal(
+                        daily_plan_id=local_daily_plan.id,
+                        meal_type=meal_data["meal_type"],
+                        dish_name=meal_data["dish_name"],
+                        description=meal_data.get("description"),
+                        cuisine=meal_data.get("cuisine"),
+                        portion_size=meal_data.get("portion_size"),
+                        calories=meal_data["calories"],
+                        protein=meal_data["protein"],
+                        carbs=meal_data["carbs"],
+                        fats=meal_data["fats"],
+                        fiber=meal_data.get("fiber"),
+                        sodium=meal_data.get("sodium"),
+                        sugar=meal_data.get("sugar"),
+                        prep_time=meal_data.get("prep_time"),
+                        ingredients=None,
+                        recipe_brief=None,
+                    )
+                    local_db.add(meal_row)
+
+            local_db.commit()
+            local_db.refresh(local_daily_plan)
+
+            # Build DailyPlanSchema response dict
+            meals = local_db.query(Meal).filter(
+                Meal.daily_plan_id == local_daily_plan.id
+            ).all()
+
+            # Pre-load member servings if joint
+            servings_map: dict = {}
+            if captured_is_joint:
+                all_meal_ids = [m.id for m in meals]
+                if all_meal_ids:
+                    servings_rows = (
+                        local_db.query(MealMemberServing)
+                        .filter(MealMemberServing.meal_id.in_(all_meal_ids))
+                        .all()
+                    )
+                    for s in servings_rows:
+                        schema = MealMemberServingSchema(
+                            member_name=s.member_name,
+                            member_profile_id=s.member_profile_id,
+                            adjustment=s.adjustment,
+                            portion_description=s.portion_description,
+                            calories=s.calories,
+                            protein=s.protein,
+                            carbs=s.carbs,
+                            fats=s.fats,
+                            fiber=s.fiber or 0,
+                        )
+                        servings_map.setdefault(s.meal_id, []).append(schema)
+
+            meals_data = [
+                MealResponse.from_orm_with_ingredients(
+                    meal,
+                    member_servings=servings_map.get(meal.id) if captured_is_joint else None,
+                )
+                for meal in meals
+            ]
+
+            day_schema = DailyPlanSchema(
+                id=local_daily_plan.id,
+                day_of_week=local_daily_plan.day_of_week,
+                day_date=local_daily_plan.day_date,
+                meals=meals_data,
+                total_calories=local_daily_plan.total_calories,
+                total_protein=local_daily_plan.total_protein,
+                total_carbs=local_daily_plan.total_carbs,
+                total_fats=local_daily_plan.total_fats,
+                total_fiber=local_daily_plan.total_fiber or 0,
+                total_sodium=local_daily_plan.total_sodium or 0,
+                total_sugar=local_daily_plan.total_sugar or 0,
+            )
+            await emitter.complete(data=day_schema.model_dump(mode="json"))
+
+        except Exception as exc:
+            local_db.rollback()
+            logger.error(
+                f"[SSE] Regenerate day failed for plan {captured_plan_id} "
+                f"day {captured_day_index}: {traceback.format_exc()}"
+            )
+            await emitter.error(f"Day regeneration failed: {str(exc)}")
+
+        finally:
+            local_db.close()
+
+    asyncio.ensure_future(run_regen_day())
+
+    return StreamingResponse(
+        emitter.stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.post("/{plan_id}/regenerate", response_model=WeeklyPlanResponse, status_code=status.HTTP_200_OK)
 async def regenerate_meal_plan(
     plan_id: int,
@@ -1289,6 +1637,154 @@ async def regenerate_meal_plan(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to regenerate meal plan. Please try again."
         )
+
+
+@router.post("/{plan_id}/regenerate-stream", status_code=200)
+async def regenerate_meal_plan_stream(
+    plan_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    SSE endpoint for regenerating the entire weekly meal plan.
+
+    Streams progress events as the plan is regenerated, then emits a "complete"
+    event with the full WeeklyPlanResponse JSON payload.
+
+    C1 — DB session lifecycle: same pattern as generate_family_meal_plan_stream.
+    """
+    old_plan = _verify_plan_ownership(db, plan_id, current_user)
+    profile = db.query(UserProfile).filter(
+        UserProfile.id == old_plan.profile_id
+    ).first()
+
+    is_joint = profile.is_joint
+    if is_joint:
+        workflow = getattr(current_user, "family_meal_workflow", "hybrid")
+        if workflow not in ("hybrid", "llm_only"):
+            workflow = "hybrid"
+        steps = STEPS_LLM_ONLY if workflow == "llm_only" else STEPS_HYBRID
+    else:
+        workflow = None
+        steps = STEPS_STANDARD
+
+    emitter = ProgressEmitter(steps)
+
+    captured_plan_id    = plan_id
+    captured_profile_id = profile.id
+    captured_is_joint   = is_joint
+    captured_workflow   = workflow
+
+    async def run_regen_week():
+        local_db = SessionLocal()
+        try:
+            await emitter.emit("started")
+
+            local_profile = local_db.query(UserProfile).filter(
+                UserProfile.id == captured_profile_id
+            ).first()
+            if not local_profile:
+                await emitter.error(f"Profile {captured_profile_id} not found.")
+                return
+
+            # Archive old plan
+            local_old_plan = local_db.query(WeeklyPlan).filter(
+                WeeklyPlan.id == captured_plan_id
+            ).first()
+            if local_old_plan:
+                local_old_plan.status = "archived"
+
+            ai_planner = AIMealPlanner()
+            week_start = date.today() + timedelta(days=1)
+
+            if captured_is_joint:
+                # ── Joint profile path ──────────────────────────────────
+                member_profiles = load_joint_members(local_db, local_profile)
+                member_targets  = build_member_targets(member_profiles)
+
+                if captured_workflow == "llm_only":
+                    raw_plan = await _run_llm_only_workflow(
+                        ai_planner=ai_planner,
+                        profile=local_profile,
+                        member_targets=member_targets,
+                        emitter=emitter,
+                    )
+                else:
+                    raw_plan = await _run_hybrid_workflow(
+                        ai_planner=ai_planner,
+                        profile=local_profile,
+                        member_targets=member_targets,
+                        emitter=emitter,
+                    )
+
+                weekly_plan = store_family_plan(
+                    local_db, local_profile, raw_plan, week_start, member_targets
+                )
+            else:
+                # ── Solo profile path ───────────────────────────────────
+                nutrition_targets = calculate_targets(local_profile)
+
+                heartbeat_task = emitter.start_heartbeat("generating", interval=5.0)
+                try:
+                    meal_plan_data = await ai_planner.generate_meal_plan(
+                        local_profile, nutrition_targets
+                    )
+
+                    solo_cuisines = (
+                        local_profile.cuisines_list
+                        if hasattr(local_profile, "cuisines_list") else []
+                    )
+                    if solo_cuisines:
+                        solo_violations = scan_plan_for_violations(
+                            meal_plan_data, solo_cuisines
+                        )
+                        if solo_violations:
+                            feedback = violations_to_feedback(solo_violations)
+                            logger.warning(
+                                f"[SSE Regen] Content filter found "
+                                f"{len(solo_violations)} violation(s), "
+                                f"regenerating with feedback: {feedback}"
+                            )
+                            meal_plan_data = await ai_planner.generate_meal_plan(
+                                local_profile, nutrition_targets,
+                                content_feedback=feedback,
+                            )
+                finally:
+                    heartbeat_task.cancel()
+
+                await emitter.emit("saving")
+                weekly_plan = store_solo_plan(
+                    local_db, local_profile, meal_plan_data, week_start
+                )
+
+            local_db.commit()
+            local_db.refresh(weekly_plan)
+
+            plan_dict = _build_weekly_plan_response_dict(local_db, weekly_plan)
+            await emitter.complete(data=plan_dict)
+
+        except Exception as exc:
+            local_db.rollback()
+            logger.error(
+                f"[SSE] Regenerate week failed for plan {captured_plan_id}: "
+                f"{traceback.format_exc()}"
+            )
+            await emitter.error(f"Week regeneration failed: {str(exc)}")
+
+        finally:
+            local_db.close()
+
+    asyncio.ensure_future(run_regen_week())
+
+    return StreamingResponse(
+        emitter.stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # =============================================================================
@@ -1505,23 +2001,17 @@ async def generate_family_meal_plan_stream(
     # completes synchronously before we return the StreamingResponse.
     profile = get_user_profile_or_404(db, profile_id, current_user)
 
-    if not profile.is_joint:
-        # For non-joint profiles, client should use the regular /generate endpoint.
-        # Return 400 with a JSON error (not SSE) so the client can handle gracefully.
-        raise HTTPException(
-            status_code=400,
-            detail="This endpoint is for joint profiles only. Use POST /generate for individual profiles.",
-        )
+    is_joint = profile.is_joint
 
-    # Select step list based on the user's workflow preference
-    workflow = getattr(current_user, "family_meal_workflow", "hybrid")
-    if workflow not in ("hybrid", "llm_only"):
-        workflow = "hybrid"
-
-    if workflow == "llm_only":
-        steps = STEPS_LLM_ONLY
+    # Select step list based on profile type and workflow preference
+    if is_joint:
+        workflow = getattr(current_user, "family_meal_workflow", "hybrid")
+        if workflow not in ("hybrid", "llm_only"):
+            workflow = "hybrid"
+        steps = STEPS_LLM_ONLY if workflow == "llm_only" else STEPS_HYBRID
     else:
-        steps = STEPS_HYBRID
+        workflow = None
+        steps = STEPS_STANDARD
 
     emitter = ProgressEmitter(steps)
 
@@ -1531,6 +2021,7 @@ async def generate_family_meal_plan_stream(
     # because SQLAlchemy tracks object ownership per session.
     captured_profile_id = profile_id
     captured_workflow   = workflow
+    captured_is_joint   = is_joint
 
     async def run_generation():
         """
@@ -1556,66 +2047,92 @@ async def generate_family_meal_plan_stream(
             await emitter.emit("started")
 
             # Re-load the profile inside local_db to avoid DetachedInstanceError.
-            # The profile was originally loaded in the request-scoped `db`; we
-            # must reload it in local_db before passing to helper functions that
-            # will issue further queries on this session.
             local_profile = local_db.query(UserProfile).filter(
                 UserProfile.id == captured_profile_id
             ).first()
             if not local_profile:
-                # Profile was deleted between validation and background start —
-                # unlikely but handled to avoid an opaque AttributeError downstream.
                 await emitter.error(f"Profile {captured_profile_id} not found.")
                 return
 
-            # Load member profiles and build per-member nutrition targets
-            member_profiles = load_joint_members(local_db, local_profile)
-            member_targets  = build_member_targets(member_profiles)
-            ai_planner      = AIMealPlanner()
-            week_start      = date.today() + timedelta(days=1)
+            ai_planner = AIMealPlanner()
+            week_start = date.today() + timedelta(days=1)
 
-            # Execute the appropriate workflow, which emits all intermediate steps
-            if captured_workflow == "llm_only":
-                raw_plan = await _run_llm_only_workflow(
-                    ai_planner=ai_planner,
-                    profile=local_profile,
-                    member_targets=member_targets,
-                    emitter=emitter,
+            if captured_is_joint:
+                # ── Joint profile path (unchanged) ──────────────────────
+                member_profiles = load_joint_members(local_db, local_profile)
+                member_targets  = build_member_targets(member_profiles)
+
+                if captured_workflow == "llm_only":
+                    raw_plan = await _run_llm_only_workflow(
+                        ai_planner=ai_planner,
+                        profile=local_profile,
+                        member_targets=member_targets,
+                        emitter=emitter,
+                    )
+                else:
+                    raw_plan = await _run_hybrid_workflow(
+                        ai_planner=ai_planner,
+                        profile=local_profile,
+                        member_targets=member_targets,
+                        emitter=emitter,
+                    )
+
+                weekly_plan = store_family_plan(
+                    local_db, local_profile, raw_plan, week_start, member_targets
                 )
             else:
-                raw_plan = await _run_hybrid_workflow(
-                    ai_planner=ai_planner,
-                    profile=local_profile,
-                    member_targets=member_targets,
-                    emitter=emitter,
+                # ── Solo profile path ───────────────────────────────────
+                nutrition_targets = calculate_targets(local_profile)
+
+                heartbeat_task = emitter.start_heartbeat("generating", interval=5.0)
+                try:
+                    meal_plan_data = await ai_planner.generate_meal_plan(
+                        local_profile, nutrition_targets
+                    )
+
+                    # Content filter: scan for cuisine-specific forbidden items
+                    solo_cuisines = (
+                        local_profile.cuisines_list
+                        if hasattr(local_profile, "cuisines_list") else []
+                    )
+                    if solo_cuisines:
+                        solo_violations = scan_plan_for_violations(
+                            meal_plan_data, solo_cuisines
+                        )
+                        if solo_violations:
+                            feedback = violations_to_feedback(solo_violations)
+                            logger.warning(
+                                f"[SSE Solo] Content filter found "
+                                f"{len(solo_violations)} violation(s), "
+                                f"regenerating with feedback: {feedback}"
+                            )
+                            meal_plan_data = await ai_planner.generate_meal_plan(
+                                local_profile, nutrition_targets,
+                                content_feedback=feedback,
+                            )
+                finally:
+                    heartbeat_task.cancel()
+
+                await emitter.emit("saving")
+                weekly_plan = store_solo_plan(
+                    local_db, local_profile, meal_plan_data, week_start
                 )
 
-            # Persist the plan. The workflow helpers already emitted "saving";
-            # this is the actual DB write that follows that event.
-            weekly_plan = store_family_plan(
-                local_db, local_profile, raw_plan, week_start, member_targets
-            )
             local_db.commit()
             local_db.refresh(weekly_plan)
 
-            # Build a plain dict for JSON serialization in the SSE payload
             plan_dict = _build_weekly_plan_response_dict(local_db, weekly_plan)
-
-            # Signal completion — this also pushes the None sentinel to end stream()
             await emitter.complete(data=plan_dict)
 
         except Exception as exc:
-            # Roll back any partial DB writes before signalling the error
             local_db.rollback()
             logger.error(
-                f"[SSE] Family meal plan generation failed for profile "
+                f"[SSE] Meal plan generation failed for profile "
                 f"{captured_profile_id}: {traceback.format_exc()}"
             )
-            # Emit a user-friendly error message then end the stream
             await emitter.error(f"Generation failed: {str(exc)}")
 
         finally:
-            # Always close the dedicated session — prevents connection pool exhaustion
             local_db.close()
 
     # Schedule run_generation() as a background task on the current event loop.
