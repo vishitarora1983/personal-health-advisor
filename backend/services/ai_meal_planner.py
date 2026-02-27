@@ -78,7 +78,11 @@ class _OpenAIProvider(_LLMProvider):
         if not settings.OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY must be set in .env when LLM_PROVIDER=openai")
 
-        self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        self.client = AsyncOpenAI(
+            api_key=settings.OPENAI_API_KEY,
+            max_retries=5,      # default is 2; bump to survive transient 429s
+            timeout=120.0,      # generous timeout per attempt (meal plans are large)
+        )
         self.model = settings.OPENAI_MODEL
         logger.info(f"OpenAI provider initialised (model={self.model})")
 
